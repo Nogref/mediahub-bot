@@ -17,7 +17,7 @@ export function helpModule(getLines: () => HelpLine[]): ModuleFactory {
           const lines = getLines()
             .filter((l) => !access.check(i, l.gate))
             .sort((a, b) => a.usage.localeCompare(b.usage))
-            .map((l) => `${l.gate && l.gate !== "music" ? `${GATE_ICON[l.gate]} ` : ""}\`${l.usage}\` — ${l.description.replace(/^Admin: /, "")}`);
+            .map((l) => `${l.gate ? `${GATE_ICON[l.gate]} ` : ""}\`${l.usage}\` — ${l.description.replace(/^Admin: /, "")}`);
           const legend = [access.isAdmin(i) ? "🔒 admins only" : "", access.isInviter(i) ? "🎟️ inviters" : ""].filter(Boolean).join(" · ");
           const embed = new EmbedBuilder()
             .setColor(Colors.info)

@@ -13,25 +13,27 @@ Two rules shape the design:
 |---|---|---|
 | `/request movie <query>` | everyone | Search Seerr, pick a result, and it's requested and auto-approved (Radarr takes over) |
 | `/request series <query>` | everyone | Same for TV (all seasons; Sonarr takes over) |
-| `/request album <query>` | 🎵 Music | Search Lidarr, then add the artist if needed, monitor the album and start a search. Falls back to Aurral |
+| `/request album <query>` | everyone | Search Lidarr, then add the artist if needed, monitor the album and start a search. Falls back to Aurral |
 | `/requests` | everyone | Your requests: live download progress for what's on its way, and what landed recently |
 | `/report <title> <problem> <details>` | everyone | Files a Seerr issue (video, audio, subtitles…) and DMs you when it's marked fixed |
-| `/music play <song/album/artist/playlist>` | 🎵 Music | Plays your library in your voice channel (autocomplete; `next:` puts it at the front) |
-| `/music radio` | 🎵 Music | Endless random songs from the library |
-| `/music queue` · `skip` · `shuffle` · `stop` | 🎵 Music | Queue control. The now-playing message also has Pause, Skip, Radio, Queue and Stop buttons |
-| `/optin me` | everyone | Your notification and music opt-ins as private toggle buttons |
-| `/status` | everyone | Checks every service now and replies privately |
-| `/random movie` | everyone | Random movie from Plex with poster, summary, reroll button and Plex link |
-| `/stats` | everyone | Plex library size, Lidarr monitored artists, Seerr request count |
-| `/help` | everyone | Lists the commands *you* can use |
-| `/statusboard post` | everyone | Posts the live board, or links to it if it already exists |
-| `/statusboard repost` | 🔒 admin | Abandons the old board and posts a fresh one |
-| `/optin setup <channel>` | 🔒 admin | Creates the opt-in roles and posts the button panel (e.g. in #welcome) |
+| `/music play <song/album/artist/playlist>` | everyone | Plays the library in your voice channel (autocomplete; `next:` puts it at the front) |
+| `/music radio` · `queue` · `skip` · `shuffle` · `stop` | everyone | Radio mode and queue control. The now-playing card also has buttons |
+| `/aurral signup [username]` | everyone | Creates your own Aurral account and DMs you the login (works in Subsonic apps too) |
+| `/aurral account` | everyone | Your Aurral username, the address, and how to listen in apps |
+| `/plezy` | everyone | Posts the Plezy guide **publicly** in the current channel (for "how do I watch?" questions) |
+| `/pings` | everyone | Choose which announcements @-ping you (Movies, TV, Music, Server status) |
+| `/status` · `/stats` · `/random movie` · `/help` | everyone | Service check, library numbers, a random movie, command list |
+| `/statusboard post` | everyone | Posts the live status board, or links to it if it already exists |
 | `/invite create [user] [name] [expiry] [uses]` | 🎟️ inviter | Creates a Wizarr invite. With `user:@someone`, the bot DMs them the link |
-| `/invite list` | 🎟️ inviter | Active invites (inviters see their own, admins see all) |
-| `/invite revoke <name>` | 🎟️ inviter | Deletes the invite in Wizarr so its link stops working |
+| `/invite list` · `/invite revoke` | 🎟️ inviter | Active invites (inviters see their own, admins all) and revoking them |
+| `/aurral create user:@x` | 🎟️ inviter | Makes an Aurral account for someone and DMs them the login |
+| `/setup welcome` · `plezy` · `stats` · `nowplaying` · `pings` | 🔒 admin | Posts (or moves) the welcome post, Plezy guide, stats board, now-playing board or ping panel |
+| `/setup edit post:…` · `/setup reset post:…` | 🔒 admin | Edit the welcome post or Plezy guide in a form; or restore the built-in text |
+| `/setup channels` · `/setup links` · `/setup show` | 🔒 admin | Set channels and public links from Discord; show the current setup |
+| `/aurral link user:@x username:…` | 🔒 admin | Connect a member to an Aurral account they already have |
+| `/statusboard repost` | 🔒 admin | Abandons the old status board and posts a fresh one |
 
-🎵 = opted in to Music (or admin). 🎟️ = admins and the Inviter role. 🔒 = admins.
+🎟️ = admins and the Inviter role. 🔒 = admins. Everything else is open to every member.
 
 Search results and replies are ephemeral, so only the person who asked sees them and channels don't flood. A command only appears when its service is configured.
 
@@ -42,7 +44,7 @@ Search results and replies are ephemeral, so only the person who asked sees them
 1. Go to <https://discord.com/developers/applications> → **New Application**, and give it a name.
 2. **Bot** tab → **Reset Token** → copy it into `DISCORD_TOKEN`.
    Leave all three **Privileged Gateway Intents** (Presence, Server Members, Message Content) **off**. The bot uses slash commands only. It connects with the `Guilds` intent, plus the non-privileged `GuildVoiceStates` intent when music streaming is configured.
-3. **Installation** or **OAuth2 → URL Generator**: choose the scopes **`bot`** and **`applications.commands`**, and these bot permissions: *View Channels, Send Messages, Embed Links, Attach Files, Read Message History, Manage Roles* (for the opt-in roles), *Connect* and *Speak* (for music). Or use this URL with your Application ID (from **General Information**):
+3. **Installation** or **OAuth2 → URL Generator**: choose the scopes **`bot`** and **`applications.commands`**, and these bot permissions: *View Channels, Send Messages, Embed Links, Attach Files, Read Message History, Manage Roles* (for the ping roles), *Connect* and *Speak* (for music). Or use this URL with your Application ID (from **General Information**):
 
    ```
    https://discord.com/oauth2/authorize?client_id=YOUR_APPLICATION_ID&scope=bot%20applications.commands&permissions=271698944
@@ -56,7 +58,7 @@ Search results and replies are ephemeral, so only the person who asked sees them
    - each channel → **Copy Channel ID** → `STATUS_CHANNEL_ID`, `NOTIFY_CHANNEL_ID`, `ADMIN_CHANNEL_ID`
    - your admin role (Server Settings → Roles) → **Copy Role ID** → `ADMIN_ROLE_ID`, and the role allowed to hand out invites → `INVITER_ROLE_ID`
 5. If those channels are private, give the bot's role access to them. It needs to send messages, embed links and read message history. The status channel also needs read history, because the bot edits its own board message there.
-6. In **Server Settings → Roles**, drag the bot's role **above** the Movies / TV / Music / Server status roles (created by `/optin setup`), or it can't hand them out.
+6. In **Server Settings → Roles**, drag the bot's role **above** the Movies / TV / Music / Server status roles (the bot creates them on `/setup welcome`), or it can't hand them out.
 
 Commands are registered to your server only (`GUILD_ID`), so they show up straight away, with no hour-long global propagation.
 
@@ -100,13 +102,23 @@ Every push to `main` builds an image and publishes it as **`ghcr.io/nogref/media
 
 **Option A: Unraid template (recommended)**
 
-1. Copy `unraid/mediahub-bot.xml` to the flash drive as `/boot/config/plugins/dockerMan/templates-user/my-mediahub-bot.xml` (e.g. via the `flash` share).
+1. Copy `unraid/my-mediahub-bot.xml` to the flash drive at `/boot/config/plugins/dockerMan/templates-user/my-mediahub-bot.xml` (e.g. via the `flash` share). **Keep that exact name, and make sure no other copy is in that folder** (see the box below).
 2. **Docker** tab → **Add Container** → **Template** dropdown → **mediahub-bot**.
 3. Fill in `DISCORD_TOKEN`, `GUILD_ID`, the channel IDs and the services you use. Leave the rest empty. Click **Show more settings** for tuning options.
 4. **Network Type**: pick the same custom network as your other containers so URLs like `http://lidarr:8686` work (see section 3). On plain *bridge*, use `http://<unraid-ip>:<port>` URLs instead.
 5. **Apply**. Updates arrive through Unraid's usual **Check for Updates**.
 
 `PUID`/`PGID` default to 99/100 (nobody:users). The container fixes ownership of the appdata folder itself, so there's no manual `chown`.
+
+> **Settings keep showing blank (or vanish after an update)?** Unraid saves your values in `templates-user/my-mediahub-bot.xml`. But when you open **Edit**, or when it applies an update, it loads the *first* file in that folder (alphabetically) whose name inside says `mediahub-bot`. An extra copy such as `mediahub-bot.xml` sorts first, so Unraid keeps loading that blank copy and rebuilds the container from it. Fix it once in the Unraid terminal:
+> ```bash
+> cd /boot/config/plugins/dockerMan/templates-user
+> grep -l "<Name>mediahub-bot</Name>" *.xml   # should list ONLY my-mediahub-bot.xml
+> rm mediahub-bot.xml                          # delete any other file it lists
+> ```
+> Then **Edit** the container, fill your values in once more and **Apply**. They'll stick from then on.
+
+**Belt and braces: `bot.env`.** The bot also reads settings from `/mnt/user/appdata/mediahub-bot/bot.env` (same `NAME=value` lines as `.env.example`). Anything set in the container wins, and anything blank there is taken from the file. Keeping your settings in that file means the bot stays configured even if the template loses them, and you can edit it over the network share.
 
 **Option B: Docker Compose** (Compose Manager plugin or the CLI)
 
@@ -118,7 +130,12 @@ docker logs -f mediahub-bot
 
 A healthy start logs the configured services, the enabled modules, `logged in as …` and `registered N command(s)`. `GET http://<host>:8787/healthz` returns `{"ok":true,"discord":"connected"}`, and the container's Docker health check uses it too.
 
-**After the first start**, run `/optin setup channel:#welcome` once to create the opt-in roles and post the button panel.
+**After the first start**, do the rest from Discord (it's stored by the bot, so the Unraid template can stay short):
+
+1. `/setup channels announcements:#new-stuff status:#server-status admin:#admin`
+2. `/setup welcome channel:#start-here` posts the welcome post, which has a ping-settings button. Then edit it with `/setup edit post:welcome`.
+3. Optional: `/setup links aurral:https://music.example.com plezy_relay:https://relay.example.com`, `/setup stats channel:#…`, `/setup nowplaying channel:#…`, `/setup plezy channel:#…`
+4. `/setup show` lists everything that's set.
 
 ---
 
@@ -234,22 +251,42 @@ The bot only creates, lists and revokes invite links. Your friend opens the link
 - Invites go to `WIZARR_SERVER_IDS` if set, otherwise to every verified Plex server in Wizarr.
 - Every create and revoke is logged in the admin channel. Links themselves are never posted there.
 
-## Opt-ins: who gets pinged for what
+## Ping settings
 
-`/optin setup channel:#welcome` (admin) creates four roles, or reuses ones with the same names or set via `ROLE_*_ID`, and posts a panel with a button for each. Tapping a button switches that role on or off and confirms privately. `/optin me` shows the same toggles with your current state.
+Four roles decide who gets @-pinged. They don't lock anything: requests, music and Aurral are open to everyone regardless.
 
-| Role | What it does |
+| Role | Pings you for |
 |---|---|
-| 🎬 Movies | New-movie announcements @-ping you |
-| 📺 TV | New-episode/show announcements @-ping you |
-| 🎵 Music | Unlocks `/request album` and `/music`, and album announcements ping you |
-| 📡 Server status | "Service down / back up" heads-ups ping you |
+| 🎬 Movies | New movies |
+| 📺 TV | New episodes and shows |
+| 🎵 Music | New albums |
+| 📡 Server status | A service going down or coming back |
 
-Opting out means *no pings*. The announcements channel stays visible to everyone. Two exceptions:
-- **Music is opt-in once the Music role exists**: people without it don't get `/request album` or `/music`. To hide album announcements from them too, set `MUSIC_NOTIFY_CHANNEL_ID` to a channel only the Music role can see.
-- **Your own requests always ping you** when they're ready, whatever you've opted out of.
+Members change theirs with the **🔔 Ping settings** button on the welcome post, or `/pings`. Either way they get private toggle buttons showing what's on. The bot creates the roles the first time they're needed, reusing roles with the same names or ones set via `ROLE_*_ID`. They're created mentionable so the bot can ping them without the "Mention Everyone" permission. `/setup pings channel:#…` posts a standalone panel if you want one outside the welcome post.
 
-The roles are created mentionable so the bot can ping them without the "Mention Everyone" permission.
+Opting out means *no pings*; the announcements stay visible. Requests you make yourself always ping you when they're ready. To keep album announcements out of the main channel, set a separate music channel with `/setup channels music_announcements:#…`.
+
+## Posts and boards
+
+All four are single messages that the bot keeps editing in place. It remembers where they are across restarts, and if one gets deleted it posts a fresh one on the next update. Place or move any of them with `/setup <name> channel:#…`.
+
+- **Welcome post** (`/setup welcome`): what the server is and how to use it, with **🔔 Ping settings** and **📱 About Plezy** buttons. Pin it and make the channel read-only.
+- **Plezy guide** (`/setup plezy`, optional): what Plezy is, why it beats the Plex app, how to start, and Download / Source buttons. **`/plezy`** posts the same guide publicly wherever it's typed, so anyone can answer "how do I watch?" in #general. A 1-minute cooldown per channel stops spam: a second `/plezy` within the minute gets a private copy instead.
+- **Stats board** (`/setup stats`): the `/stats` numbers plus how much was requested from Discord this week. It's re-checked every `STATS_REFRESH_MINUTES` (30) and edited **only when a number changes**.
+- **Now-playing board** (`/setup nowplaying`): see *Music streaming*.
+
+**Editing the text.** `/setup edit post:welcome` (or `post:plezy`) opens a form pre-filled with the current text: a title and up to four sections. It's plain Discord markdown: `**bold**`, `*italics*`, bullets, links. Three tokens fill themselves in: `{server}` (server name), `{aurral}` (Aurral address from `/setup links`) and `{relay}` (your Plezy relay, or "the default" if none). Save, and the live post updates immediately. If the total goes over Discord's 6,000-character limit, your text is kept as a draft so the next `/setup edit` brings it back for trimming. `/setup reset` restores the built-in text. Posts also refresh themselves when you change links with `/setup links`.
+
+## Aurral accounts
+
+Aurral has no invite links, but its admin API can create users, so the bot does it:
+
+- **`/aurral signup`**: makes the member's own account (username from their Discord name, or `username:` to choose) with a random password, and DMs them the address, username and password (in a spoiler). It also tells them how to change the password and how to listen in Subsonic apps, which use the same login. If their DMs are closed, the reply itself is private, so the login is shown there. One account per member; running it again just shows their username.
+- **`/aurral create user:@x`** (inviters): the same, on someone's behalf.
+- **`/aurral link user:@x username:…`** (admin): connects someone who already had an Aurral account.
+- **Forgotten passwords:** Aurral's API won't let an API key reset another user's password (it requires a recent sign-in by an admin), so an admin resets it in Aurral → Settings → Users.
+- New accounts get Aurral's default permissions (Settings → Users → Default permissions).
+- Set the address members see with `/setup links aurral:https://…`. Without it they get the internal address.
 
 ## `/requests` and `/report`
 
@@ -263,8 +300,9 @@ The roles are created mentionable so the bot can ping them without the "Mention 
 - **Setup:** create a user for the bot in Aurral (Settings → Users) and put its credentials in `SUBSONIC_USER` / `SUBSONIC_PASSWORD`. The bot tries token auth first and switches to password auth automatically if the server needs it. A `Subsonic` line appears on the status board.
 - **No transcoding in the bot:** it asks the server for Opus (`format=opus`, `MUSIC_BITRATE` kbps), which Aurral produces with its own ffmpeg. Audio goes straight into Discord, so the bot image needs no ffmpeg. Navidrome works if its Opus transcoding is enabled (it is by default).
 - **Encryption:** Discord requires end-to-end encrypted voice (DAVE) for every bot since March 2026. The bundled `@discordjs/voice` handles it.
-- **Using it:** join a voice channel, then `/music play` and start typing. Suggestions cover artists (plays their top songs), albums, playlists and songs. A single **now-playing message** with cover art and Pause / Skip / Radio / Queue / Stop buttons lives in the voice channel's own text chat and updates as tracks change, so it doesn't clutter other channels.
-- **Who controls it:** anyone with the Music opt-in who's in the same voice channel, plus admins.
+- **Using it:** join a voice channel, then `/music play` and start typing. Suggestions cover artists (plays their top songs), albums, playlists and songs.
+- **Now playing for everyone:** `/setup nowplaying channel:#music` posts a public board that's edited with every song (cover art, artist, album, what's up next, which voice channel) and goes back to "Nothing playing" when the music stops. It has Pause / Skip / Radio / Queue / Stop buttons. Without a board, the same card appears in the voice channel's own text chat.
+- **Who controls it:** anyone in the same voice channel, plus admins.
 - **Leaving:** the bot leaves `MUSIC_IDLE_MINUTES` (5) after the queue ends or everyone leaves, and when `/music stop` is used.
 - **Limits:** one voice channel at a time, and no volume command, since that would mean decoding audio in the bot. Listeners can right-click the bot to set their own volume.
 
@@ -272,7 +310,7 @@ The roles are created mentionable so the bot can ping them without the "Mention 
 
 ## Adding a new handler
 
-Each feature is one file in `src/modules/` that exports a **factory**. The factory gets the shared context (config, service clients, SQLite store, Discord client, notifier, opt-in roles, access checks) and returns a `BotModule`, or `null` when what it needs isn't configured. Then the feature simply doesn't exist: no commands are registered and it never runs. `src/modules/index.ts` is the list of features. Delete a line, and its file, to remove one.
+Each feature is one file in `src/modules/` that exports a **factory**. The factory gets the shared context (config, service clients, SQLite store, Discord client, notifier, ping roles, access checks, and an in-process event bus) and returns a `BotModule`, or `null` when what it needs isn't configured. Then the feature simply doesn't exist: no commands are registered and it never runs. `src/modules/index.ts` is the list of features. Delete a line, and its file, to remove one.
 
 A module can contribute any of:
 
@@ -352,7 +390,7 @@ Write a parser in `src/webhooks/<name>.ts` that turns the payload into `InboundE
 1. **test**: `npm ci`, the full test suite, and a check that `unraid/mediahub-bot.xml` still matches `.env.example`.
 2. **image** (on `main` and `v*` tags only): builds the image, **smoke-tests it** (native modules load, the voice encryption library is present, the container drops to uid 99, and it refuses to start without config), then pushes to `ghcr.io/<owner>/mediahub-bot` with tags `latest`, the short commit SHA, and the version for `v1.2.3`-style tags.
 
-Change `.env.example` → run `node scripts/gen-unraid-template.mjs` → commit both. Dependabot opens weekly PRs for npm updates, grouping discord.js packages so they stay in step.
+Change `.env.example` → run `node scripts/gen-unraid-template.mjs` → commit both. The template is deliberately named `my-mediahub-bot.xml`, the same file Unraid saves your values into, so copying it in can never leave a second, blank copy behind. Unraid doesn't add new template variables to an existing container, which is one reason most new settings live in Discord (`/setup`) instead. Dependabot opens weekly PRs for npm updates, grouping discord.js packages so they stay in step.
 
 ## Development
 
@@ -371,7 +409,7 @@ src/
   index.ts              boot: config → store → clients → modules → Discord + webhook server
   config.ts             env parsing; unconfigured services become undefined
   core/                 http (timeouts, ApiError), db (SQLite), registry (commands/routing),
-                        access gates, opt-in role directory, helpers
+                        access gates, ping roles, Discord-side settings, live messages
   services/             one thin API client per service (incl. Subsonic)
   modules/              one file per feature (see table above)
   music/                voice session (queue, playback, now-playing message)
@@ -396,7 +434,8 @@ docker-entrypoint.sh    fixes /data ownership for PUID:PGID, then drops root
 | Webhook test returns 401 | `?secret=` doesn't match `WEBHOOK_SECRET` |
 | `DATA_DIR … isn't writable` | Normally handled by the container on start. If you run it with `--user`, `chown -R 99:100 /mnt/user/appdata/mediahub-bot` |
 | Requests show as pending in Seerr | Shouldn't happen, because the admin API key auto-approves. If it does, check that the Seerr API key belongs to an admin |
-| Opt-in buttons say "not allowed to change that role" | Move the bot's role above the opt-in roles in Server Settings → Roles |
+| Unraid settings show blank / reset after an update | A second template copy is shadowing yours. See the box in section 4 |
+| Ping buttons say "not allowed to change that role" | Move the bot's role above the ping roles in Server Settings → Roles |
 | `/music` says the server "didn't send Opus audio" | Enable Opus transcoding on the Subsonic server (Navidrome: Settings → Transcoding) |
 | Bot joins voice but there's no sound | Check it has **Speak** in that channel, and that the Subsonic user can stream (try the same account in a Subsonic app) |
 | Unraid can't pull the image | Make the GHCR package public, or `docker login ghcr.io` (see section 4) |

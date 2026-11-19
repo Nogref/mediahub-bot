@@ -10,6 +10,7 @@ import {
   type Client,
   type Interaction,
   type MessageComponentInteraction,
+  type ModalSubmitInteraction,
   type RESTPostAPIChatInputApplicationCommandsJSONBody,
 } from "discord.js";
 import type { Config } from "../config.js";
@@ -42,6 +43,7 @@ export class Registry {
   status: RegistrationStatus = { ok: false, error: "not registered yet (waiting for Discord login)" };
   private handlers = new Map<string, Handler>();
   private components = new Map<string, (i: MessageComponentInteraction) => Promise<void>>();
+  private modals = new Map<string, (i: ModalSubmitInteraction) => Promise<void>>();
   private json: RESTPostAPIChatInputApplicationCommandsJSONBody[] = [];
   readonly help: HelpLine[] = [];
 
@@ -72,6 +74,10 @@ export class Registry {
       for (const [prefix, fn] of Object.entries(m.components ?? {})) {
         if (this.components.has(prefix)) throw new Error(`Duplicate component prefix "${prefix}" (module ${m.name})`);
         this.components.set(prefix, fn);
+      }
+      for (const [prefix, fn] of Object.entries(m.modals ?? {})) {
+        if (this.modals.has(prefix)) throw new Error(`Duplicate modal prefix "${prefix}" (module ${m.name})`);
+        this.modals.set(prefix, fn);
       }
     }
     for (const [name, { description, subs }] of parents) {
@@ -130,6 +136,10 @@ export class Registry {
         const prefix = i.customId.split(":")[0];
         const fn = this.components.get(prefix);
         if (!fn) return respond(i, "This button has expired. Run the command again.");
+        await fn(i);
+      } else if (i.isModalSubmit()) {
+        const fn = this.modals.get(i.customId.split(":")[0]);
+        if (!fn) return respond(i, "This form has expired. Open it again.");
         await fn(i);
       }
     } catch (err) {

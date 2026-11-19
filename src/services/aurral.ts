@@ -25,10 +25,22 @@ export interface AurralRequestResult {
   albumStatus?: { status?: string; recovery?: { code?: string; message?: string } } | null;
 }
 
+export interface AurralUser {
+  id: number;
+  username: string;
+  role?: string;
+  status?: string;
+}
+
 export class AurralClient {
   readonly name = "Aurral";
 
   constructor(private readonly cfg: NonNullable<Config["aurral"]>) {}
+
+  /** Internal address (what the bot uses); members need the public one from /setup links. */
+  get url(): string {
+    return this.cfg.url;
+  }
 
   private call<T>(path: string, opts: RequestOptions = {}) {
     return request<T>(this.name, `${this.cfg.url}/api${path}`, {
@@ -49,6 +61,15 @@ export class AurralClient {
   /** POST /api/library/albums/request — adds the artist if needed and queues the album. */
   requestAlbum(body: { albumMbid: string; albumName: string; artistMbid: string; artistName: string }): Promise<AurralRequestResult> {
     return this.call(`/library/albums/request`, { method: "POST", body, timeoutMs: 30_000 });
+  }
+
+  users(): Promise<AurralUser[]> {
+    return this.call(`/users`);
+  }
+
+  /** Admin API key only. The password also becomes the account's Subsonic password. */
+  createUser(username: string, password: string): Promise<AurralUser> {
+    return this.call(`/users`, { method: "POST", body: { username, password, role: "user" } });
   }
 
   /** Status is one of complete, downloading, queued, blocked, cancelled, failed, partial, missing. */

@@ -25,10 +25,8 @@ function presentedSecret(req: Request): string | undefined {
 }
 
 export const webhooks: ModuleFactory = ({ cfg, notifier }) => {
-  if (!cfg.channels.notify && !cfg.channels.admin && !cfg.channels.status) {
-    return null; // nowhere to post anything
-  }
-
+  // Always on: channels can be set later from Discord, and the notifier
+  // simply drops events for which no channel is configured.
   return {
     name: "webhooks",
     routes: (router) => {

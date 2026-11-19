@@ -4,6 +4,7 @@
  * Seerr/Radarr/Sonarr/Lidarr/Aurral/Wizarr keep working without it.
  */
 import { Client, Events, GatewayIntentBits } from "discord.js";
+import { EventEmitter } from "node:events";
 import { loadConfig } from "./config.js";
 import { Access } from "./core/access.js";
 import { Store } from "./core/db.js";
@@ -12,6 +13,7 @@ import { log } from "./core/logger.js";
 import type { AppContext, BotModule } from "./core/module.js";
 import { Registry } from "./core/registry.js";
 import { RoleDirectory } from "./core/roles.js";
+import { applyStoredSettings } from "./core/settings.js";
 import { inviteUrl, resolveGuild } from "./core/setup.js";
 import { helpModule } from "./modules/help.js";
 import { moduleFactories } from "./modules/index.js";
@@ -29,10 +31,11 @@ async function main() {
   // states are only requested when music streaming is configured.
   const intents = [GatewayIntentBits.Guilds, ...(cfg.subsonic ? [GatewayIntentBits.GuildVoiceStates] : [])];
   const client = new Client({ intents });
+  applyStoredSettings(cfg, store); // channels/links set from Discord win over env
   const roles = new RoleDirectory(store, cfg);
-  const access = new Access(cfg, roles);
+  const access = new Access(cfg);
   const notifier = new Notifier(client, store, cfg, roles);
-  const ctx: AppContext = { cfg, store, client, services, notifier, roles, access };
+  const ctx: AppContext = { cfg, store, client, services, notifier, roles, access, bus: new EventEmitter() };
 
   let registry: Registry | undefined;
   const factories = [...moduleFactories, helpModule(() => registry?.help ?? [])];

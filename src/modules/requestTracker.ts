@@ -86,7 +86,7 @@ export async function checkPendingRequests(ctx: AppContext): Promise<number> {
 
 export const requestTracker: ModuleFactory = (ctx) => {
   const { cfg, services } = ctx;
-  if (!cfg.channels.notify || cfg.notify.reconcileMinutes <= 0) return null;
+  if (cfg.notify.reconcileMinutes <= 0) return null;
   if (!services.seerr && !services.lidarr && !services.aurral) return null;
 
   let timer: NodeJS.Timeout | undefined;
@@ -94,7 +94,7 @@ export const requestTracker: ModuleFactory = (ctx) => {
   let running = false;
 
   async function sweep() {
-    if (running) return;
+    if (running || !cfg.channels.notify) return; // nowhere to post pings yet
     running = true;
     try {
       await checkPendingRequests(ctx);

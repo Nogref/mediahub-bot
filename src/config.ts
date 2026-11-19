@@ -4,6 +4,9 @@
  * Every integration is optional: if its variables are missing the matching
  * config block is `undefined`, and every module that needs it switches itself off.
  */
+import fs from "node:fs";
+import path from "node:path";
+import { parseEnv } from "node:util";
 import { log } from "./core/logger.js";
 
 export interface ServiceConfig {
@@ -17,8 +20,11 @@ export interface Config {
   discordToken: string;
   guildId: string;
   adminRoleId?: string;
+  /** Channels can also be set from Discord with /setup channels (stored in the DB, wins over env). */
   channels: { status?: string; notify?: string; admin?: string; music?: string };
-  /** Opt-in roles. Unset ones are created by /optin setup and remembered in the DB. */
+  /** Public links shown to members; also settable with /setup links. */
+  links: { aurral?: string; plezyRelay?: string };
+  /** Ping roles. Unset ones are created by /setup and remembered in the DB. */
   roles: { movies?: string; tv?: string; music?: string; status?: string };
   invites: { inviterRoleId?: string; maxActive: number; expiryDays: 1 | 7 | 30 };
   dataDir: string;
@@ -53,6 +59,7 @@ export interface Config {
     failThreshold: number;
     slowMs: number;
   };
+  stats: { refreshMinutes: number };
   /** Present in the requested env contract; no feature reads it yet (see README). */
   promoteSecret?: string;
 }
@@ -122,12 +129,42 @@ function keyed(prefix: string): KeyedServiceConfig | undefined {
   return undefined;
 }
 
+/**
+ * Optional settings file in the data folder (default /data/bot.env, i.e. the
+ * appdata share on Unraid). Container env wins when it has a non-empty value;
+ * the file fills in everything else. This keeps the bot configured even if
+ * the Unraid template loses its values.
+ */
+export function loadEnvFile(dataDir = process.env.DATA_DIR?.trim() || "/data"): string | undefined {
+  const file = path.join(dataDir, "bot.env");
+  let text: string;
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch {
+    return undefined;
+  }
+  const parsed = parseEnv(text);
+  let applied = 0;
+  for (const [k, v] of Object.entries(parsed)) {
+    if (!process.env[k]?.trim()) {
+      process.env[k] = v;
+      applied++;
+    }
+  }
+  log.info(`config: read ${applied} setting(s) from ${file}`);
+  return file;
+}
+
 export function loadConfig(): Config {
+  loadEnvFile();
   const discordToken = env("DISCORD_TOKEN");
   const guildId = env("GUILD_ID");
   const missing = [!discordToken && "DISCORD_TOKEN", !guildId && "GUILD_ID"].filter(Boolean);
   if (missing.length) {
-    throw new Error(`Missing required environment variable(s): ${missing.join(", ")}. See .env.example.`);
+    throw new Error(
+      `Missing required environment variable(s): ${missing.join(", ")}. Set them in the container settings, ` +
+        `or in bot.env in the data folder (/mnt/user/appdata/mediahub-bot/bot.env on Unraid). See .env.example.`,
+    );
   }
 
   const seerrBase = keyed("SEERR");
@@ -174,6 +211,10 @@ export function loadConfig(): Config {
       notify: env("NOTIFY_CHANNEL_ID"),
       admin: env("ADMIN_CHANNEL_ID"),
       music: env("MUSIC_NOTIFY_CHANNEL_ID"),
+    },
+    links: {
+      aurral: url("AURRAL_PUBLIC_URL"),
+      plezyRelay: url("PLEZY_RELAY_URL"),
     },
     roles: {
       movies: env("ROLE_MOVIES_ID"),
@@ -240,6 +281,7 @@ export function loadConfig(): Config {
       failThreshold: num("STATUS_FAIL_THRESHOLD", 2, 1),
       slowMs: num("STATUS_SLOW_MS", 2000, 100),
     },
+    stats: { refreshMinutes: num("STATS_REFRESH_MINUTES", 30, 5) },
     promoteSecret: env("PROMOTE_SECRET"),
   };
 

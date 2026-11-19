@@ -12,6 +12,7 @@ import { startServer } from "../dist/web/server.js";
 import { setDefaultTimeout } from "../dist/core/http.js";
 import { RoleDirectory } from "../dist/core/roles.js";
 import { Access } from "../dist/core/access.js";
+import { EventEmitter } from "node:events";
 
 let mock;
 before(async () => {
@@ -34,13 +35,14 @@ function setup(overrides = {}, sharedClient) {
   const services = buildServices(cfg);
   const client = sharedClient ?? fakeClient();
   const roles = new RoleDirectory(store, cfg);
-  const access = new Access(cfg, roles);
+  const access = new Access(cfg);
   const notifier = new Notifier(client, store, cfg, roles);
-  const ctx = { cfg, store, client, services, notifier, roles, access };
+  const bus = new EventEmitter();
+  const ctx = { cfg, store, client, services, notifier, roles, access, bus };
   let registry;
   const modules = [...moduleFactories, helpModule(() => registry.help)].map((f) => f(ctx)).filter(Boolean);
   registry = new Registry(modules, cfg, access);
-  return { cfg, store, services, client, notifier, modules, registry, roles, access };
+  return { cfg, store, services, client, notifier, modules, registry, roles, access, bus, ctx };
 }
 
 /** Route a fake slash command through the registry like Discord would. */
@@ -66,25 +68,32 @@ test("command set: everything registers, descriptions are valid, gates set", () 
   const { registry } = setup({ subsonic: { url: `${mock.base}/aurral`, user: "bot", password: "pw", bitrate: 128, idleMinutes: 5 } });
   const usages = registry.help.map((h) => h.usage).sort();
   assert.deepEqual(usages, [
+    "/aurral account", "/aurral create", "/aurral link", "/aurral signup",
     "/help", "/invite create", "/invite list", "/invite revoke",
     "/music play", "/music queue", "/music radio", "/music shuffle", "/music skip", "/music stop",
-    "/optin me", "/optin setup", "/random movie", "/report",
-    "/request album", "/request movie", "/request series", "/requests", "/stats", "/status",
-    "/statusboard post", "/statusboard repost",
+    "/pings", "/plezy", "/random movie", "/report",
+    "/request album", "/request movie", "/request series", "/requests",
+    "/setup channels", "/setup edit", "/setup links", "/setup nowplaying", "/setup pings", "/setup plezy", "/setup reset", "/setup show", "/setup stats", "/setup welcome",
+    "/stats", "/status", "/statusboard post", "/statusboard repost",
   ]);
   const gated = Object.fromEntries(registry.help.filter((h) => h.gate).map((h) => [h.usage, h.gate]));
   assert.equal(gated["/invite create"], "inviter");
+  assert.equal(gated["/aurral create"], "inviter");
+  assert.equal(gated["/aurral link"], "admin");
   assert.equal(gated["/statusboard repost"], "admin");
-  assert.equal(gated["/optin setup"], "admin");
-  assert.equal(gated["/request album"], "music");
-  assert.equal(gated["/music play"], "music");
-  assert.equal(gated["/request movie"], undefined);
+  for (const u of usages.filter((x) => x.startsWith("/setup "))) assert.equal(gated[u], "admin", u);
+  // Music and requests are open to everyone.
+  for (const u of ["/request album", "/music play", "/aurral signup", "/request movie", "/pings", "/plezy"]) assert.equal(gated[u], undefined, u);
 });
 
 test("missing services drop their commands", () => {
   const { registry } = setup({ lidarr: undefined, aurral: undefined, wizarr: undefined, plex: undefined, channels: { notify: "c" } });
   const usages = registry.help.map((h) => h.usage).sort();
-  assert.deepEqual(usages, ["/help", "/optin me", "/optin setup", "/report", "/request movie", "/request series", "/requests", "/stats", "/status"]);
+  assert.deepEqual(usages, [
+    "/help", "/pings", "/plezy", "/report", "/request movie", "/request series", "/requests",
+    "/setup channels", "/setup edit", "/setup links", "/setup pings", "/setup plezy", "/setup reset", "/setup show", "/setup stats", "/setup welcome",
+    "/stats", "/status", "/statusboard post", "/statusboard repost",
+  ]);
 });
 
 test("/request movie: search → buttons → request attributed to mapped Seerr user", async () => {
@@ -378,41 +387,217 @@ test("/report files a Seerr issue and DMs the reporter when Seerr resolves it", 
   notifier.stop();
 });
 
-test("opt-in: setup creates roles + panel, buttons toggle roles, music unlocks, announcements ping roles", async () => {
-  const { registry, client, roles, access, notifier, store } = setup();
+test("pings: welcome setup creates roles, buttons toggle them, announcements ping roles, music isn't gated", async () => {
+  const { registry, client, roles, notifier, store } = setup();
   const { fakeGuild } = await import("./helpers.mjs");
   const guild = fakeGuild(client);
-  const i = fakeInteraction({ options: { __sub: "setup", channel: { id: "c-welcome" } }, roles: ["admin-role"] });
-  Object.assign(i, { commandName: "optin", guildId: "g1", guild, isChatInputCommand: () => true, isAutocomplete: () => false, isMessageComponent: () => false, isRepliable: () => true });
-  await registry.handle(i);
-  assert.match(i.last().content, /Opt-in panel posted.*Created roles: Movies, TV, Music, Server status/s);
-  assert.equal(guild._roles.size, 4);
-  assert.ok([...guild._roles.values()].every((r) => r.mentionable));
-  const panel = client.sent.find((x) => x.channelId === "c-welcome").payload;
-  assert.equal(panel.components[0].toJSON().components.length, 4);
+  const run = async (name, sub, options, extra = {}) => {
+    const i = fakeInteraction({ options: { ...options, __sub: sub }, ...extra });
+    Object.assign(i, { commandName: name, guildId: "g1", guild, channelId: "c-general", isChatInputCommand: () => true, isAutocomplete: () => false, isMessageComponent: () => false, isModalSubmit: () => false, isRepliable: () => true });
+    await registry.handle(i);
+    return i;
+  };
+  const press = async (customId, userId = "m1") => {
+    const b = fakeInteraction({ customId, userId });
+    Object.assign(b, { guildId: "g1", guild, isChatInputCommand: () => false, isAutocomplete: () => false, isMessageComponent: () => true, isModalSubmit: () => false, isRepliable: () => true });
+    await registry.handle(b);
+    return b;
+  };
 
-  // Before opting in, music is locked for a regular member.
-  const musicRole = roles.get("music");
-  const asMember = (extra = {}) => ({ userId: "m1", roles: [...(guild._memberRoles.get("m1") ?? [])], ...extra });
-  const locked = await slash(registry, "request", "album", { query: "x" }, asMember());
-  assert.match(locked.last().content, /Music is opt-in/);
+  const w = await run("setup", "welcome", { channel: { id: "c-welcome" } }, { roles: ["admin-role"] });
+  assert.match(w.last().content, /Welcome post posted in <#c-welcome>/);
+  assert.equal(guild._roles.size, 4, "ping roles created for the welcome post's button");
+  const welcome = client.sent.find((x) => x.channelId === "c-welcome").payload;
+  assert.match(welcome.embeds[0].toJSON().title, /Welcome to Test Server/);
+  const ids = welcome.components[0].toJSON().components.map((c) => c.custom_id);
+  assert.deepEqual(ids, ["optin:open", "posts:plezy"]);
 
-  const b = fakeInteraction({ customId: "optin:music:p", userId: "m1" });
-  Object.assign(b, { guildId: "g1", guild, isChatInputCommand: () => false, isAutocomplete: () => false, isMessageComponent: () => true, isRepliable: () => true });
-  await registry.handle(b);
-  assert.match(b.last().content, /\*\*Music\*\* is now \*\*on\*\*/);
-  assert.ok(guild._memberRoles.get("m1").has(musicRole));
-  assert.equal(access.hasMusic({ member: { roles: [musicRole] } }), true);
+  // Button on the welcome post → private settings, then toggle Music on.
+  const open = await press("optin:open");
+  assert.match(open.last().embeds[0].toJSON().title, /Your ping settings/);
+  const t = await press("optin:music:p");
+  assert.match(t.last().content, /\*\*Music\*\* pings are now \*\*on\*\*/);
+  assert.ok(guild._memberRoles.get("m1").has(roles.get("music")));
 
-  // Announcements ping the opt-in role of each category in the batch.
+  // Music features are open to people without the Music role.
+  const album = await run("request", "album", { query: "album one" }, { userId: "m2", roles: [] });
+  assert.doesNotMatch(album.last().content ?? "", /opt-in/);
+  assert.ok(album.last().embeds?.length, "album search ran");
+
+  // Announcements ping the ping role of each category in the batch.
   const { parseRadarr, parseLidarr } = await import("../dist/webhooks/arr.js");
   notifier.publish(parseRadarr({ eventType: "Download", movie: { title: "Heat", year: 1995, tmdbId: 949 } }));
   notifier.publish(parseLidarr({ eventType: "Download", artist: { name: "Radiohead" }, album: { title: "Kid A" } }));
   await notifier.flush("c-notify");
   const msg = client.sent.at(-1).payload;
-  assert.match(msg.content, new RegExp(`<@&${roles.get("movies")}> <@&${musicRole}>`));
-  assert.deepEqual(msg.allowedMentions.roles.sort(), [roles.get("movies"), musicRole].sort());
+  assert.match(msg.content, new RegExp(`<@&${roles.get("movies")}> <@&${roles.get("music")}>`));
   notifier.stop();
+  store.close();
+});
+
+test("posts: edit form is pre-filled, saving updates the live post, oversize text becomes a draft, /plezy is public with a cooldown", async () => {
+  const { registry, client, store, cfg, bus } = setup();
+  const { fakeGuild } = await import("./helpers.mjs");
+  const guild = fakeGuild(client);
+  const base = { guildId: "g1", guild, channelId: "c-general", isAutocomplete: () => false, isRepliable: () => true };
+  const run = async (name, sub, options, extra = {}) => {
+    const i = fakeInteraction({ options: { ...options, __sub: sub }, ...extra });
+    Object.assign(i, base, { commandName: name, isChatInputCommand: () => true, isMessageComponent: () => false, isModalSubmit: () => false });
+    await registry.handle(i);
+    return i;
+  };
+  const admin = { roles: ["admin-role"] };
+  await run("setup", "plezy", { channel: { id: "c-guides" } }, admin);
+  const live = client.sent.find((x) => x.channelId === "c-guides");
+  const liveMsg = client.messages.get(store.kvGet("live.plezy").messageId);
+  assert.match(live.payload.embeds.map((e) => e.toJSON().description).join("\n"), /set it to the default \(leave it as it is\)/);
+  const links = live.payload.components[0].toJSON().components.map((c) => c.url);
+  assert.deepEqual(links, ["https://plezy.app", "https://github.com/edde746/plezy"]);
+
+  // Setting the relay link refreshes the post by itself.
+  await run("setup", "links", { plezy_relay: "https://relay.example.com" }, admin);
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(cfg.links.plezyRelay, "https://relay.example.com");
+  assert.match(liveMsg.edits.at(-1).embeds.map((e) => e.toJSON().description).join("\n"), /`https:\/\/relay\.example\.com`/);
+
+  // The editor opens pre-filled.
+  const ed = await run("setup", "edit", { post: "welcome" }, admin);
+  const modal = ed.log.find((l) => l.type === "modal").m;
+  assert.equal(modal.custom_id, "post:welcome");
+  assert.equal(modal.components.length, 5);
+  assert.match(modal.components[0].components[0].value, /Welcome to \{server\}/);
+
+  const submit = async (name, values) => {
+    const m = fakeInteraction({ customId: `post:${name}` });
+    Object.assign(m, base, { isChatInputCommand: () => false, isMessageComponent: () => false, isModalSubmit: () => true, fields: { getTextInputValue: (k) => values[k] ?? "" } });
+    await registry.handle(m);
+    return m;
+  };
+  // Not placed yet → saved + preview.
+  const saved = await submit("welcome", { title: "Hi {server}", s0: "Line one", s1: "", s2: "", s3: "" });
+  assert.match(saved.last().content, /Saved\. Post it with/);
+  assert.equal(saved.last().embeds[0].toJSON().title, "Hi Test Server");
+  assert.deepEqual(store.kvGet("post.welcome"), { title: "Hi {server}", sections: ["Line one", "", "", ""] });
+
+  // Placed → edits in place.
+  await submit("plezy", { title: "Get Plezy", s0: "Short version", s1: "", s2: "", s3: "" });
+  assert.equal(liveMsg.edits.at(-1).embeds[0].toJSON().title, "Get Plezy");
+
+  // Too long → kept as a draft, live post untouched.
+  const big = "x".repeat(3500);
+  const tooBig = await submit("plezy", { title: "Big", s0: big, s1: big, s2: "", s3: "" });
+  assert.match(tooBig.last().content, /saved as a draft/);
+  assert.equal(store.kvGet("post.plezy").title, "Get Plezy");
+  assert.equal(store.kvGet("post.plezy.draft").title, "Big");
+
+  // /plezy: public the first time, private copy within the cooldown.
+  const p1 = await run("plezy", null, {});
+  assert.equal(p1.log.find((l) => l.type === "reply").p.flags, undefined, "visible to everyone");
+  const p2 = await run("plezy", null, {});
+  assert.ok(p2.log.find((l) => l.type === "reply").p.flags, "second one is ephemeral");
+  bus.removeAllListeners();
+  store.close();
+});
+
+test("settings: /setup channels persists and survives a restart; bot.env fills gaps without overriding", async () => {
+  const { registry, cfg, store } = setup();
+  const i = fakeInteraction({ options: { __sub: "channels", announcements: { id: "c-new" }, clear: "admin" }, roles: ["admin-role"] });
+  Object.assign(i, { commandName: "setup", guildId: "g1", isChatInputCommand: () => true, isAutocomplete: () => false, isMessageComponent: () => false, isModalSubmit: () => false, isRepliable: () => true });
+  await registry.handle(i);
+  assert.equal(cfg.channels.notify, "c-new");
+  assert.equal(cfg.channels.admin, undefined);
+  const { applyStoredSettings } = await import("../dist/core/settings.js");
+  const fresh = { channels: { notify: "from-env", admin: "env-admin", status: "env-status" }, links: {} };
+  applyStoredSettings(fresh, store);
+  assert.deepEqual(fresh.channels, { notify: "c-new", admin: undefined, status: "env-status" });
+
+  const { loadEnvFile } = await import("../dist/config.js");
+  const fs = await import("node:fs");
+  const dir = (await import("./helpers.mjs")).tmpDir();
+  fs.writeFileSync(`${dir}/bot.env`, "MB_TEST_A=from-file\nMB_TEST_B=from-file\nMB_TEST_C=\"quoted value\"\n");
+  process.env.MB_TEST_A = "from-container";
+  process.env.MB_TEST_B = "";
+  loadEnvFile(dir);
+  assert.equal(process.env.MB_TEST_A, "from-container");
+  assert.equal(process.env.MB_TEST_B, "from-file", "blank container value is filled from bot.env");
+  assert.equal(process.env.MB_TEST_C, "quoted value");
+  store.close();
+});
+
+test("stats board: placed once, edited only when a number changes", async () => {
+  const { registry, client, store, modules, bus } = setup();
+  const i = fakeInteraction({ options: { __sub: "stats", channel: { id: "c-stats" } }, roles: ["admin-role"] });
+  Object.assign(i, { commandName: "setup", guildId: "g1", isChatInputCommand: () => true, isAutocomplete: () => false, isMessageComponent: () => false, isModalSubmit: () => false, isRepliable: () => true });
+  await registry.handle(i);
+  const posted = client.sent.find((x) => x.channelId === "c-stats").payload.embeds[0].toJSON();
+  assert.match(posted.title, /Library at a glance/);
+  assert.ok(posted.fields.some((f) => /3 movies/.test(f.value)));
+  assert.ok(posted.fields.some((f) => /Nothing yet this week/.test(f.value)));
+  const msg = client.messages.get(store.kvGet("live.stats").messageId);
+
+  const statsMod = modules.find((m) => m.name === "stats");
+  await statsMod.start();
+  const settle = () => new Promise((r) => setTimeout(r, 150));
+  bus.emit("stats-refresh");
+  await settle();
+  assert.equal(msg.edits.length, 0, "no edit when nothing changed");
+
+  store.addRequest({ discordUserId: "x", kind: "movie", target: "seerr", title: "Y", tmdbId: 5 });
+  bus.emit("stats-refresh");
+  await settle();
+  assert.equal(msg.edits.length, 1, "edited once the numbers changed");
+  assert.ok(msg.edits[0].embeds[0].toJSON().fields.some((f) => /1 · 1 movies/.test(f.value)));
+  statsMod.stop();
+  bus.removeAllListeners();
+  store.close();
+});
+
+test("aurral: signup creates the account and DMs the login once; taken names and links handled", async () => {
+  mock.state.aurralUsers = [{ id: 1, username: "admin", role: "admin" }, { id: 2, username: "taken", role: "user" }];
+  const { registry, client, store } = setup();
+  const run = async (sub, options, extra = {}) => {
+    const i = fakeInteraction({ options: { ...options, __sub: sub }, ...extra });
+    Object.assign(i, { commandName: "aurral", guildId: "g1", user: { id: extra.userId ?? "u1", username: extra.username ?? "Alex.B!" }, isChatInputCommand: () => true, isAutocomplete: () => false, isMessageComponent: () => false, isModalSubmit: () => false, isRepliable: () => true });
+    await registry.handle(i);
+    return i;
+  };
+  const r1 = await run("signup", {});
+  const post = mock.calls.filter((x) => x.method === "POST" && x.path === "/aurral/api/users").at(-1);
+  assert.equal(post.body.username, "alex.b");
+  assert.equal(post.body.role, "user");
+  assert.ok(post.body.password.length >= 16);
+  assert.match(r1.last().content, /sent your login in a DM/);
+  const desc = client.dms.at(-1).payload.embeds[0].toJSON().description;
+  assert.match(desc, new RegExp(`\\|\\|\`${post.body.password}\`\\|\\|`));
+  assert.equal(store.aurralAccount("u1").username, "alex.b");
+
+  const again = await run("signup", {});
+  assert.match(again.last().content, /already have an account/);
+  assert.doesNotMatch(JSON.stringify(again.last().embeds[0].toJSON()), new RegExp(post.body.password), "password never shown again");
+
+  const taken = await run("signup", { username: "taken" }, { userId: "u2", username: "sam" });
+  assert.match(taken.last().content, /already an Aurral account called `taken`/);
+
+  const linked = await run("link", { user: { id: "u2" }, username: "taken" }, { roles: ["admin-role"], userId: "boss" });
+  assert.match(linked.last().content, /linked to the Aurral account `taken`/);
+  assert.equal(store.aurralAccount("u2").username, "taken");
+
+  const denied = await run("create", { user: { id: "u3", username: "kim", bot: false } }, { roles: [], userId: "u4" });
+  assert.match(denied.last().content, /Inviter role/);
+  store.close();
+});
+
+test("live messages: deleted messages are re-posted on the next update", async () => {
+  const { LiveMessage } = await import("../dist/core/liveMessage.js");
+  const { client, store } = setup();
+  const lm = new LiveMessage(client, store, "t");
+  const first = await lm.place("c-x", { content: "v1" });
+  assert.equal(await lm.update({ content: "v2" }), true);
+  assert.equal(client.messages.get(first.id).edits.at(-1).content, "v2");
+  client.messages.get(first.id).deleted = true;
+  await lm.update({ content: "v3" });
+  assert.notEqual(lm.location.messageId, first.id);
+  assert.equal(client.sent.at(-1).payload.content, "v3");
   store.close();
 });
 

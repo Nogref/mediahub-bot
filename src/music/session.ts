@@ -25,19 +25,21 @@ import {
   ButtonBuilder,
   ButtonStyle,
   EmbedBuilder,
-  type Message,
-  type SendableChannels,
   type VoiceBasedChannel,
 } from "discord.js";
 import { Readable } from "node:stream";
 import type { ReadableStream as WebReadableStream } from "node:stream/web";
 import { Colors, truncate } from "../core/discord.js";
+import type { LivePayload } from "../core/liveMessage.js";
 import { log } from "../core/logger.js";
 import type { SubsonicClient } from "../services/subsonic.js";
 import { TrackQueue, fmtDuration, songLabel, type Track } from "./queue.js";
 
 const RADIO_BATCH = 20;
 const RADIO_LOW_WATER = 5;
+
+/** Where the now-playing card goes (a pinned board, or the voice channel's chat). */
+export type NowPlayingDisplay = (payload: LivePayload, ended: boolean) => Promise<void>;
 
 export class MusicSession {
   readonly queue = new TrackQueue();
@@ -47,15 +49,15 @@ export class MusicSession {
   private player: AudioPlayer;
   private connection?: VoiceConnection;
   private resource?: AudioResource<Track>;
-  private nowPlaying?: Message;
-  private textChannel?: SendableChannels;
   private idleTimer?: NodeJS.Timeout;
+  private renderTimer?: NodeJS.Timeout;
   private failures = 0;
   private destroyed = false;
 
   constructor(
     private readonly subsonic: SubsonicClient,
     private readonly idleMinutes: number,
+    private readonly display: NowPlayingDisplay,
     private readonly onEnd: () => void,
   ) {
     this.player = createAudioPlayer({ behaviors: { noSubscriber: NoSubscriberBehavior.Pause } });
@@ -71,8 +73,7 @@ export class MusicSession {
     return this.player.state.status !== AudioPlayerStatus.Idle;
   }
 
-  async join(channel: VoiceBasedChannel, fallbackText?: SendableChannels): Promise<void> {
-    this.textChannel = channel.isSendable() ? channel : fallbackText;
+  async join(channel: VoiceBasedChannel): Promise<void> {
     if (this.connection && this.voiceChannelId === channel.id) return;
     this.connection?.destroy();
     const connection = joinVoiceChannel({
@@ -219,14 +220,26 @@ export class MusicSession {
     );
   }
 
-  /** Creates or edits the single now-playing message. */
-  private async renderNowPlaying(final?: string): Promise<void> {
-    if (!this.textChannel) return;
+  /** Coalesces bursts of changes (queueing an album, pause/resume) into one edit. */
+  private renderNowPlaying(): Promise<void> {
+    if (this.renderTimer) clearTimeout(this.renderTimer);
+    return new Promise((resolve) => {
+      this.renderTimer = setTimeout(() => {
+        this.renderTimer = undefined;
+        void this.buildAndShow().finally(resolve);
+      }, 750);
+    });
+  }
+
+  private async buildAndShow(final?: string): Promise<void> {
     const t = this.current;
     const embed = new EmbedBuilder().setColor(Colors.plex);
     const files: AttachmentBuilder[] = [];
     if (final || !t) {
-      embed.setColor(Colors.muted).setTitle(final ? "⏹️ Music stopped" : "🎶 Queue finished").setDescription(final ?? `Add more with \`/music play\`, or I'll leave in ${this.idleMinutes} min.`);
+      embed
+        .setColor(Colors.muted)
+        .setTitle(final ? "⏹️ Music stopped" : "🎶 Queue finished")
+        .setDescription(final ?? `Add more with \`/music play\`, or I'll leave in ${this.idleMinutes} min.`);
     } else {
       const s = t.song;
       const upNext = this.queue
@@ -235,8 +248,13 @@ export class MusicSession {
         .map((q, i) => `${i + 1}. ${truncate(songLabel(q.song), 70)}`)
         .join("\n");
       embed
+        .setAuthor({ name: this.voiceChannelId ? "Now playing in voice" : "Now playing" })
         .setTitle(truncate(`${this.paused ? "⏸️" : "🎶"} ${s.title}`, 256))
-        .setDescription([s.artist && `**${s.artist}**`, s.album && `*${s.album}*`, fmtDuration(s.duration)].filter(Boolean).join(" · "))
+        .setDescription(
+          [[s.artist && `**${s.artist}**`, s.album && `*${s.album}*`, fmtDuration(s.duration)].filter(Boolean).join(" · "), this.voiceChannelId ? `🔊 <#${this.voiceChannelId}>` : ""]
+            .filter(Boolean)
+            .join("\n"),
+        )
         .setFooter({ text: `${t.radio ? "📻 Radio pick" : `Requested by ${t.requestedBy}`}${this.queue.length ? ` · ${this.queue.length} in queue` : ""}` });
       if (upNext) embed.addFields({ name: "Up next", value: upNext });
       if (s.coverArt) {
@@ -248,15 +266,11 @@ export class MusicSession {
         }
       }
     }
-    const payload = { embeds: [embed], files, components: final || !t ? [] : [this.controls()] };
+    const ended = Boolean(final);
     try {
-      // attachments: [] drops the previous cover before the new one is added.
-      if (this.nowPlaying) await this.nowPlaying.edit({ ...payload, attachments: [] });
-      else this.nowPlaying = await this.textChannel.send(payload);
-    } catch {
-      // Message deleted or channel unavailable: post a fresh one.
-      this.nowPlaying = undefined;
-      if (!final) this.nowPlaying = await this.textChannel.send(payload).catch(() => undefined);
+      await this.display({ embeds: [embed], files, components: final || !t ? [] : [this.controls()], allowedMentions: { parse: [] } }, ended);
+    } catch (err) {
+      log.warn(`music: couldn't update the now-playing card: ${(err as Error).message}`);
     }
   }
 
@@ -272,7 +286,8 @@ export class MusicSession {
     } catch {
       /* already gone */
     }
-    await this.renderNowPlaying(reason).catch(() => undefined);
+    if (this.renderTimer) clearTimeout(this.renderTimer);
+    await this.buildAndShow(reason).catch(() => undefined);
     this.onEnd();
   }
 }

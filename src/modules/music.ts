@@ -5,8 +5,10 @@
  * channel (and admins).
  */
 import {
+  ChannelType,
   EmbedBuilder,
   MessageFlags,
+  type Message,
   type AutocompleteInteraction,
   type BaseInteraction,
   type ChatInputCommandInteraction,
@@ -16,20 +18,52 @@ import {
   type VoiceBasedChannel,
 } from "discord.js";
 import { Colors, truncate } from "../core/discord.js";
+import { LiveMessage, type LivePayload } from "../core/liveMessage.js";
 import { log } from "../core/logger.js";
 import type { ModuleFactory, SubcommandDef } from "../core/module.js";
 import { TtlCache } from "../core/ttlCache.js";
-import { MusicSession } from "../music/session.js";
+import { MusicSession, type NowPlayingDisplay } from "../music/session.js";
+import { SETUP } from "./settings.js";
 import { fmtDuration, songLabel, type Track } from "../music/queue.js";
 import type { SubsonicPlaylist, SubsonicSong } from "../services/subsonic.js";
 
-const PARENT = { parent: "music", parentDescription: "Play music from the server's library in voice", gate: "music" } as const;
+const PARENT = { parent: "music", parentDescription: "Play music from the server's library in voice" } as const;
 
-export const music: ModuleFactory = ({ services, cfg, client, access }) => {
+export const music: ModuleFactory = ({ services, cfg, client, access, store }) => {
   const subsonic = services.subsonic;
   if (!subsonic || !cfg.subsonic) return null;
 
   let session: MusicSession | undefined;
+  /** Public now-playing board (/setup nowplaying); without one, the card goes in the voice channel's chat. */
+  const board = new LiveMessage(client, store, "nowplaying");
+
+  const idleCard = (): LivePayload => ({
+    embeds: [
+      new EmbedBuilder()
+        .setColor(Colors.muted)
+        .setTitle("🎶 Nothing playing")
+        .setDescription("Join a voice channel and use `/music play` to pick something, or `/music radio` for random songs from the library."),
+    ],
+    components: [],
+  });
+
+  /** Picks where this session's now-playing card lives. */
+  function displayFor(voice: VoiceBasedChannel, fallback?: SendableChannels): NowPlayingDisplay {
+    let chatMessage: Message | undefined;
+    const chat = voice.isSendable() ? (voice as SendableChannels) : fallback;
+    return async (payload, ended) => {
+      if (board.location) {
+        await board.update(ended ? idleCard() : payload); // after stopping, the board goes back to "nothing playing"
+        return;
+      }
+      if (!chat) return;
+      if (chatMessage) {
+        chatMessage = await chatMessage.edit({ ...payload, attachments: [] }).catch(() => undefined);
+        if (chatMessage) return;
+      }
+      if (!ended) chatMessage = await chat.send(payload).catch(() => undefined);
+    };
+  }
   const playlistCache = new TtlCache<string, SubsonicPlaylist[]>(5 * 60_000);
 
   const memberVoice = (i: BaseInteraction): VoiceBasedChannel | null => (i.member as GuildMember | null)?.voice?.channel ?? null;
@@ -79,10 +113,10 @@ export const music: ModuleFactory = ({ services, cfg, client, access }) => {
     const me = voice.guild.members.me;
     const perms = me ? voice.permissionsFor(me) : null;
     if (perms && (!perms.has("Connect") || !perms.has("Speak"))) return `I need **Connect** and **Speak** permissions in <#${voice.id}>.`;
-    session ??= new MusicSession(subsonic!, cfg.subsonic!.idleMinutes, () => {
+    session ??= new MusicSession(subsonic!, cfg.subsonic!.idleMinutes, displayFor(voice, i.channel?.isSendable() ? (i.channel as SendableChannels) : undefined), () => {
       session = undefined;
     });
-    await session.join(voice, i.channel?.isSendable() ? (i.channel as SendableChannels) : undefined);
+    await session.join(voice);
     return session;
   }
 
@@ -202,11 +236,21 @@ export const music: ModuleFactory = ({ services, cfg, client, access }) => {
       sub("skip", "Skip the current song", (i) => control(i, "skip")),
       sub("shuffle", "Shuffle the queue", (i) => control(i, "shuffle")),
       sub("stop", "Stop, clear the queue and leave the voice channel", (i) => control(i, "stop")),
+      {
+        ...SETUP,
+        name: "nowplaying",
+        description: "Post a public 'now playing' board that updates with every song",
+        build: (b) => b.addChannelOption((o) => o.setName("channel").setDescription("Where it lives").addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement).setRequired(true)),
+        execute: async (i) => {
+          const channel = i.options.getChannel("channel", true);
+          await i.deferReply({ flags: MessageFlags.Ephemeral });
+          const msg = await board.place(channel.id, idleCard());
+          await i.editReply(`🎶 Now-playing board posted in <#${msg.channelId}>. It updates with every song, for everyone.${session ? " It takes over from the next song." : ""}`);
+        },
+      },
     ],
     components: {
       player: async (i) => {
-        const denied = access.check(i, "music");
-        if (denied) return void (await i.reply({ content: denied, flags: MessageFlags.Ephemeral }));
         await control(i, i.customId.split(":")[1]);
       },
     },

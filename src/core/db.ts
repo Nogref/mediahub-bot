@@ -163,6 +163,13 @@ export class Store {
         status          TEXT NOT NULL DEFAULT 'open',
         created_at      INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS aurral_accounts (
+        discord_user_id TEXT PRIMARY KEY,
+        aurral_user_id  INTEGER NOT NULL,
+        username        TEXT NOT NULL,
+        created_by      TEXT NOT NULL,
+        created_at      INTEGER NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS service_state (
         service    TEXT PRIMARY KEY,
         up         INTEGER NOT NULL,
@@ -267,6 +274,13 @@ export class Store {
     return { pending, done };
   }
 
+  /** Requests made through the bot since `sinceMs` (for the stats board). */
+  requestCountSince(sinceMs: number): { total: number; movie: number; tv: number; album: number } {
+    const rows = this.db.prepare("SELECT kind, COUNT(*) AS n FROM requests WHERE created_at >= ? GROUP BY kind").all(sinceMs) as Array<{ kind: string; n: number }>;
+    const by = Object.fromEntries(rows.map((r) => [r.kind, r.n])) as Record<string, number>;
+    return { total: rows.reduce((a, r) => a + r.n, 0), movie: by.movie ?? 0, tv: by.tv ?? 0, album: by.album ?? 0 };
+  }
+
   markNotified(ids: number[]) {
     if (!ids.length) return;
     const stmt = this.db.prepare("UPDATE requests SET status = 'notified', notified_at = ? WHERE id = ?");
@@ -339,6 +353,20 @@ export class Store {
     if (!open) return undefined;
     this.db.prepare("UPDATE reports SET status = 'resolved' WHERE issue_id = ?").run(issueId);
     return open;
+  }
+
+  // ---- Aurral accounts made from Discord (one per member) -------------------
+  aurralAccount(discordUserId: string): { aurralUserId: number; username: string; createdAt: number } | undefined {
+    const r = this.db.prepare("SELECT * FROM aurral_accounts WHERE discord_user_id = ?").get(discordUserId) as Row | undefined;
+    return r ? { aurralUserId: r.aurral_user_id as number, username: r.username as string, createdAt: r.created_at as number } : undefined;
+  }
+  saveAurralAccount(discordUserId: string, aurralUserId: number, username: string, createdBy: string) {
+    this.db
+      .prepare("INSERT OR REPLACE INTO aurral_accounts(discord_user_id, aurral_user_id, username, created_by, created_at) VALUES(?, ?, ?, ?, ?)")
+      .run(discordUserId, aurralUserId, username, createdBy, Date.now());
+  }
+  deleteAurralAccount(discordUserId: string) {
+    this.db.prepare("DELETE FROM aurral_accounts WHERE discord_user_id = ?").run(discordUserId);
   }
 
   // ---- service up/down memory (so transitions survive restarts) --------------

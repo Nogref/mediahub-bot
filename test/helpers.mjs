@@ -13,6 +13,8 @@ export function fakeConfig(overrides = {}) {
     guildId: "g1",
     adminRoleId: "admin-role",
     channels: { status: "c-status", notify: "c-notify", admin: "c-admin" },
+    links: {},
+    stats: { refreshMinutes: 30 },
     roles: {},
     invites: { inviterRoleId: "inviter-role", maxActive: 3, expiryDays: 7 },
     dataDir: tmpDir(),
@@ -56,6 +58,10 @@ export function fakeClient() {
       return makeMessage(id, payload);
     },
     messages: {
+      async delete(mid) {
+        const m = messages.get(mid);
+        if (m) m.deleted = true;
+      },
       async fetch(mid) {
         const m = messages.get(mid);
         if (!m || m.deleted) {
@@ -76,6 +82,7 @@ export function fakeClient() {
     closedDMs,
     isReady: () => true,
     channels: { fetch: async (id) => channel(id) },
+    guilds: { cache: new Map([["g1", { id: "g1", name: "Test Server" }]]) },
     users: {
       fetch: async (id) => ({
         id,
@@ -145,6 +152,7 @@ export function fakeInteraction({ options = {}, customId, userId = "u1", roles =
       getChannel: (n) => options[n] ?? null,
       getBoolean: (n) => options[n] ?? null,
       getInteger: (n) => options[n] ?? null,
+      getFocused: () => options.__focused ?? "",
       getSubcommand: () => options.__sub ?? null,
       getFocused: () => options.__focused ?? "",
     },
@@ -153,6 +161,7 @@ export function fakeInteraction({ options = {}, customId, userId = "u1", roles =
     async reply(p) { i.replied = true; log.push({ type: "reply", p }); },
     async editReply(p) { log.push({ type: "edit", p: typeof p === "string" ? { content: p } : p }); },
     async update(p) { log.push({ type: "update", p }); },
+    async showModal(m) { log.push({ type: "modal", m: m.toJSON() }); },
     async respond(c) { log.push({ type: "autocomplete", c }); },
     last() { return log.filter((l) => l.type === "edit" || l.type === "reply" || l.type === "update").at(-1)?.p; },
   };

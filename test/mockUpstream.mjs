@@ -10,6 +10,7 @@ export async function startMock() {
     polls: 0,
     invites: [],
     nextInvite: 5,
+    aurralUsers: [{ id: 1, username: "admin", role: "admin" }, { id: 2, username: "taken", role: "user" }],
   };
 
   const lidarrSearch = [
@@ -115,6 +116,14 @@ export async function startMock() {
       return send(201, { success: true, status: "queued", album: { id: "lib-1" }, createdArtist: true, queued: true, albumStatus: { status: "queued" } });
     }
     if (p === "/aurral/api/library/albums/lib-1/status") return send(200, { status: "complete" });
+    if (p === "/aurral/api/users" && m === "GET") return send(200, state.aurralUsers);
+    if (p === "/aurral/api/users" && m === "POST") {
+      if (state.aurralUsers.some((u) => u.username === parsed.username.toLowerCase())) return send(409, { error: "Username already exists" });
+      if ((parsed.password ?? "").length < 8) return send(400, { error: "Password must be at least 8 characters long" });
+      const u = { id: state.aurralUsers.length + 10, username: parsed.username.toLowerCase(), role: parsed.role };
+      state.aurralUsers.push(u);
+      return send(201, u);
+    }
 
     // ---------------- Subsonic (served by "Aurral")
     if (p.startsWith("/aurral/rest/")) {

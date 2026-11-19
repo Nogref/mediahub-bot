@@ -320,7 +320,6 @@ export const musicRequests: ModuleFactory = ({ services, store, cfg }) => {
         parent: "request",
         parentDescription: "Request movies, series or albums",
         name: "album",
-        gate: "music",
         description: `Request an album (goes to ${NAMES[order[0]]}${order[1] ? `, falls back to ${NAMES[order[1]]}` : ""})`,
         build: (b) => b.addStringOption((o) => o.setName("query").setDescription("Album and/or artist name").setRequired(true).setMaxLength(100)),
         execute: command,

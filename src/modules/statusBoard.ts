@@ -155,7 +155,8 @@ export const statusBoard: ModuleFactory = (ctx) => {
   const { cfg, store, client } = ctx;
   if (!healthTargets(ctx.services).length) return null;
 
-  const channelId = cfg.channels.status;
+  // Read at use time: /setup channels can change it while the bot runs.
+  const statusChannelId = () => cfg.channels.status;
   const tracker = new HealthTracker(cfg.status.failThreshold, cfg.status.slowMs, store.serviceStates(), (k, up, at) => store.setServiceState(k, up, at));
   let board: Message | undefined;
   let views: ServiceView[] = [];
@@ -167,13 +168,14 @@ export const statusBoard: ModuleFactory = (ctx) => {
   const link = (m: { channelId: string; id: string }) => `https://discord.com/channels/${cfg.guildId}/${m.channelId}/${m.id}`;
 
   async function statusChannel(): Promise<SendableChannels | undefined> {
+    const channelId = statusChannelId();
     if (!channelId) return undefined;
     const ch = await client.channels.fetch(channelId).catch((err) => {
-      log.error(`status: can't open STATUS_CHANNEL_ID ${channelId}: ${(err as Error).message}`);
+      log.error(`status: can't open the status channel ${channelId}: ${(err as Error).message}`);
       return null;
     });
     if (!ch?.isSendable()) {
-      log.error(`status: STATUS_CHANNEL_ID ${channelId} isn't a text channel the bot can post in`);
+      log.error(`status: status channel ${channelId} isn't a text channel the bot can post in`);
       return undefined;
     }
     return ch;
@@ -192,9 +194,14 @@ export const statusBoard: ModuleFactory = (ctx) => {
 
   /** Finds the stored board message, or posts a new one if it's gone or in another channel. */
   async function ensureBoard(): Promise<Message | undefined> {
+    if (board && board.channelId !== statusChannelId()) {
+      // Status channel changed via /setup channels: retire the old board.
+      await board.delete().catch(() => undefined);
+      board = undefined;
+    }
     if (board) return board;
     const stored = store.kvGet<{ channelId: string; messageId: string }>(BOARD_KEY);
-    if (stored && stored.channelId === channelId) {
+    if (stored && stored.channelId === statusChannelId()) {
       const ch = await statusChannel();
       if (!ch) return undefined;
       try {
@@ -236,7 +243,7 @@ export const statusBoard: ModuleFactory = (ctx) => {
         log.info(`status: ${t.name} is ${t.up ? "UP" : "DOWN"}`);
         await headsUp(t);
       }
-      if (!channelId) return;
+      if (!statusChannelId()) return;
 
       const sig = signature(views);
       const due = sig !== lastSig || Date.now() - lastEditAt >= cfg.status.refreshMinutes * 60_000;
@@ -261,8 +268,7 @@ export const statusBoard: ModuleFactory = (ctx) => {
     }
   }
 
-  const subcommands: SubcommandDef[] = channelId
-    ? [
+  const subcommands: SubcommandDef[] = [
         {
           parent: "statusboard",
           parentDescription: "Manage the live status board",
@@ -274,7 +280,7 @@ export const statusBoard: ModuleFactory = (ctx) => {
             if (existing) return void (await respond(i, `📡 The status board is already live: ${link(existing)}`));
             const msg = await postBoard();
             board = msg;
-            await respond(i, msg ? `📡 Posted the status board: ${link(msg)}` : "⚠️ I couldn't post in STATUS_CHANNEL_ID. Check the bot's permissions there.");
+            await respond(i, msg ? `📡 Posted the status board: ${link(msg)}` : statusChannelId() ? "⚠️ I couldn't post in the status channel. Check my permissions there." : "Set a status channel first: `/setup channels status:#channel`.");
           },
         },
         {
@@ -287,7 +293,7 @@ export const statusBoard: ModuleFactory = (ctx) => {
             await i.deferReply({ flags: MessageFlags.Ephemeral });
             const old = board;
             const msg = await postBoard();
-            if (!msg) return void (await respond(i, "⚠️ I couldn't post in STATUS_CHANNEL_ID. Check the bot's permissions there."));
+            if (!msg) return void (await respond(i, statusChannelId() ? "⚠️ I couldn't post in the status channel. Check my permissions there." : "Set a status channel first: `/setup channels status:#channel`."));
             board = msg;
             if (old) {
               await old
@@ -297,13 +303,12 @@ export const statusBoard: ModuleFactory = (ctx) => {
             await respond(i, `📡 Fresh status board posted: ${link(msg)}`);
           },
         },
-      ]
-    : [];
+      ];
 
   /** Like ensureBoard, but never posts: used by /statusboard post to decide. */
   async function ensureBoardIfStored(): Promise<Message | undefined> {
     const stored = store.kvGet<{ channelId: string; messageId: string }>(BOARD_KEY);
-    if (!stored || stored.channelId !== channelId) return undefined;
+    if (!stored || stored.channelId !== statusChannelId()) return undefined;
     const ch = await statusChannel();
     if (!ch) return undefined;
     try {
@@ -329,7 +334,7 @@ export const statusBoard: ModuleFactory = (ctx) => {
     ],
     subcommands,
     start: async () => {
-      if (!channelId) log.info("status: STATUS_CHANNEL_ID not set; live board disabled (/status still works)");
+      if (!statusChannelId()) log.info("status: no status channel yet (set one with /setup channels status:#channel); /status still works");
       // First tick finds the stored board (or posts a new one) and fills it in.
       await tick();
       timer = setInterval(() => void tick(), cfg.status.intervalSeconds * 1000);

@@ -1,6 +1,10 @@
 #!/usr/bin/env node
-// Generates unraid/mediahub-bot.xml from .env.example, so every variable and its
+// Generates unraid/my-mediahub-bot.xml from .env.example, so every variable and its
 // comment shows up in Unraid's "Add Container" form.
+//
+// The file is named my-<container>.xml on purpose: that's the exact file Unraid saves
+// your values into. A copy under any other name (e.g. mediahub-bot.xml) sorts first,
+// and Unraid's Edit/Update would keep loading that blank copy instead of your values.
 //   node scripts/gen-unraid-template.mjs           write the template
 //   node scripts/gen-unraid-template.mjs --check   fail if it's out of date (CI)
 import fs from "node:fs";
@@ -62,7 +66,7 @@ const xml = `<?xml version="1.0"?>
   <Overview>Discord bot for a Plex + Seerr + Radarr/Sonarr + Tautulli + Lidarr/Aurral + Wizarr stack: requests, new-content announcements with @-pings, a live status board, Wizarr invites and music streaming into voice channels. To reach other containers by name (http://lidarr:8686), set Network Type to the same custom network they use; on plain bridge, use http://YOUR-UNRAID-IP:PORT addresses instead.</Overview>
   <Category>MediaServer:Other Tools:</Category>
   <WebUI/>
-  <TemplateURL>${raw}/unraid/mediahub-bot.xml</TemplateURL>
+  <TemplateURL>${raw}/unraid/my-mediahub-bot.xml</TemplateURL>
   <Icon>${raw}/unraid/icon.png</Icon>
   <ExtraParams/>
   <PostArgs/>
@@ -76,11 +80,11 @@ ${configs.join("\n")}
 </Container>
 `;
 
-const out = path.join(root, "unraid", "mediahub-bot.xml");
+const out = path.join(root, "unraid", "my-mediahub-bot.xml");
 if (process.argv.includes("--check")) {
   const current = fs.existsSync(out) ? fs.readFileSync(out, "utf8") : "";
   if (current !== xml) {
-    console.error("unraid/mediahub-bot.xml is out of date. Run: node scripts/gen-unraid-template.mjs");
+    console.error("unraid/my-mediahub-bot.xml is out of date. Run: node scripts/gen-unraid-template.mjs");
     process.exit(1);
   }
   console.log(`Unraid template is up to date (${vars.length} variables).`);
