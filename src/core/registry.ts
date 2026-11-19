@@ -14,9 +14,10 @@ import {
 } from "discord.js";
 import type { Config } from "../config.js";
 import type { Access, Gate } from "./access.js";
-import { respond, respondError } from "./discord.js";
+import { discordErrorCode, respond, respondError } from "./discord.js";
 import { log } from "./logger.js";
 import type { BotModule, CommandDef, SubcommandDef } from "./module.js";
+import { registrationHint } from "./setup.js";
 
 type Handler = Pick<CommandDef, "adminOnly" | "gate" | "execute" | "autocomplete" | "description">;
 
@@ -28,7 +29,17 @@ export interface HelpLine {
 
 const gateOf = (h: Pick<CommandDef, "adminOnly" | "gate">): Gate | undefined => h.gate ?? (h.adminOnly ? "admin" : undefined);
 
+export interface RegistrationStatus {
+  ok: boolean;
+  count?: number;
+  guild?: string;
+  error?: string;
+  hint?: string;
+  at?: string;
+}
+
 export class Registry {
+  status: RegistrationStatus = { ok: false, error: "not registered yet (waiting for Discord login)" };
   private handlers = new Map<string, Handler>();
   private components = new Map<string, (i: MessageComponentInteraction) => Promise<void>>();
   private json: RESTPostAPIChatInputApplicationCommandsJSONBody[] = [];
@@ -85,8 +96,18 @@ export class Registry {
    */
   async register(client: Client<true>): Promise<void> {
     const rest = new REST().setToken(this.cfg.discordToken);
-    await rest.put(Routes.applicationGuildCommands(client.application.id, this.cfg.guildId), { body: this.json });
-    log.info(`discord: registered ${this.json.length} command(s) in guild ${this.cfg.guildId}: ${this.json.map((c) => `/${c.name}`).join(" ")}`);
+    const guildName = client.guilds.cache.get(this.cfg.guildId)?.name ?? this.cfg.guildId;
+    try {
+      const res = (await rest.put(Routes.applicationGuildCommands(client.application.id, this.cfg.guildId), { body: this.json })) as unknown[];
+      this.status = { ok: true, count: res.length, guild: guildName, at: new Date().toISOString() };
+      log.info(`discord: registered ${res.length} command(s) in "${guildName}": ${this.json.map((c) => `/${c.name}`).join(" ")}`);
+    } catch (err) {
+      const code = discordErrorCode(err);
+      const hint = registrationHint(code, client.application.id);
+      this.status = { ok: false, guild: guildName, error: (err as Error).message, hint, at: new Date().toISOString() };
+      log.error(`discord: slash-command registration FAILED in "${guildName}": ${(err as Error).message}`);
+      log.error(`discord: ${hint}`);
+    }
   }
 
   async handle(i: Interaction): Promise<void> {

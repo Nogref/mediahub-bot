@@ -256,7 +256,7 @@ test("status board: posts once, reuses it after restart, reposts if deleted, ski
 
 test("webhook server: secret enforced, unknown service 404, events reach the notifier", async () => {
   const { modules, client, notifier, store } = setup();
-  const server = startServer(0, modules, client);
+  const server = startServer(0, modules, client, () => ({ commands: { ok: false, error: "Missing Access", hint: "re-invite" } }));
   await new Promise((r) => server.once("listening", r));
   const port = server.address().port;
   const url = (s, q = "") => `http://127.0.0.1:${port}/webhook/${s}${q}`;
@@ -273,6 +273,7 @@ test("webhook server: secret enforced, unknown service 404, events reach the not
   assert.deepEqual(await play.json(), { ok: true, accepted: 0 });
   const health = await fetch(`http://127.0.0.1:${port}/healthz`);
   assert.equal(health.status, 200);
+  assert.deepEqual((await health.json()).commands, { ok: false, error: "Missing Access", hint: "re-invite" });
 
   await notifier.flush("c-notify");
   assert.match(json(client.sent.at(-1).payload.embeds[0]).title, /Heat \(1995\)/);

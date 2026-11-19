@@ -192,3 +192,17 @@ test("Seerr issue webhooks: created → admin alert, resolved → issue event", 
   const [resolved] = parseSeerr({ notification_type: "ISSUE_RESOLVED", issue: { issue_id: "4" } });
   assert.deepEqual({ type: resolved.type, action: resolved.action, issueId: resolved.issueId }, { type: "issue", action: "resolved", issueId: 4 });
 });
+
+test("setup: GUILD_ID resolution and registration hints", async () => {
+  const { resolveGuild, registrationHint, inviteUrl } = await import("../dist/core/setup.js");
+  const home = { id: "111", name: "Home" };
+  assert.equal(resolveGuild("111", [home]).kind, "ok");
+  const fb = resolveGuild("999", [home]);
+  assert.equal(fb.kind, "fallback");
+  assert.equal(fb.guild.id, "111");
+  assert.equal(resolveGuild("999", []).kind, "none");
+  assert.equal(resolveGuild("999", [home, { id: "222", name: "Other" }]).kind, "ambiguous");
+  assert.match(registrationHint(50001, "42"), /applications\.commands.*client_id=42/);
+  assert.match(registrationHint(10004, "42"), /Copy Server ID/);
+  assert.match(inviteUrl("42"), /scope=bot%20applications\.commands&permissions=271698944$/);
+});

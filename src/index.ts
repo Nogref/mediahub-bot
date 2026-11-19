@@ -12,6 +12,7 @@ import { log } from "./core/logger.js";
 import type { AppContext, BotModule } from "./core/module.js";
 import { Registry } from "./core/registry.js";
 import { RoleDirectory } from "./core/roles.js";
+import { inviteUrl, resolveGuild } from "./core/setup.js";
 import { helpModule } from "./modules/help.js";
 import { moduleFactories } from "./modules/index.js";
 import { Notifier } from "./notify/notifier.js";
@@ -54,14 +55,31 @@ async function main() {
 
   client.once(Events.ClientReady, async (c) => {
     log.info(`discord: logged in as ${c.user.tag}`);
-    if (!c.guilds.cache.has(cfg.guildId)) {
-      log.error(`discord: the bot isn't in guild ${cfg.guildId}. Invite it with the URL from the README, then restart.`);
+    log.info(`discord: invite / re-authorize link: ${inviteUrl(c.application.id)}`);
+    const guilds = [...c.guilds.cache.values()].map((g) => ({ id: g.id, name: g.name }));
+    const found = resolveGuild(cfg.guildId, guilds);
+    switch (found.kind) {
+      case "ok":
+        log.info(`discord: serving "${found.guild.name}" (${found.guild.id})`);
+        break;
+      case "fallback":
+        log.warn(
+          `discord: GUILD_ID ${found.configured} isn't a server this bot is in. It's only in "${found.guild.name}", so using that. ` +
+            `Set GUILD_ID=${found.guild.id} to silence this warning.`,
+        );
+        cfg.guildId = found.guild.id;
+        break;
+      case "none":
+        log.error(`discord: the bot isn't in any server yet. Add it with the invite link above, then restart the container.`);
+        break;
+      case "ambiguous":
+        log.error(
+          `discord: GUILD_ID ${found.configured} isn't one of this bot's servers: ${found.guilds.map((g) => `"${g.name}" (${g.id})`).join(", ")}. Set GUILD_ID to the right one and restart.`,
+        );
+        break;
     }
-    try {
-      await registry!.register(c);
-    } catch (err) {
-      log.error("discord: slash-command registration failed (check GUILD_ID and that the bot was invited with applications.commands)", err);
-    }
+    if (found.kind === "ok" || found.kind === "fallback") await registry!.register(c);
+    else registry!.status = { ok: false, error: "GUILD_ID doesn't match a server the bot is in", hint: "See the container log for the servers it's in." };
     for (const m of modules) {
       try {
         await m.start?.();
@@ -74,7 +92,7 @@ async function main() {
   client.on(Events.Error, (err) => log.error(`discord: client error: ${err.message}`));
   client.on(Events.Warn, (msg) => log.warn(`discord: ${msg}`));
 
-  const server = startServer(cfg.http.port, modules, client);
+  const server = startServer(cfg.http.port, modules, client, () => ({ commands: registry?.status }));
 
   let shuttingDown = false;
   const shutdown = async (signal: string) => {

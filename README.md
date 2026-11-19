@@ -389,7 +389,7 @@ docker-entrypoint.sh    fixes /data ownership for PUID:PGID, then drops root
 
 | Symptom | Fix |
 |---|---|
-| No slash commands | The bot was invited without `applications.commands`, or `GUILD_ID` is wrong. Re-invite with the URL above and check the log line `registered N command(s)` |
+| No slash commands | Open `http://<unraid-ip>:8787/healthz`: `commands.ok` says whether registration worked, and `commands.hint` says how to fix it. The container log also prints a ready-made re-invite link. Usual causes: the bot was invited without `applications.commands` (re-invite with that link), or `GUILD_ID` isn't your server's ID. On mobile, fully close and reopen Discord once after the first registration |
 | "I couldn't reach Lidarr" | Container networking: use the container name on a shared network, or the host IP. Never use localhost |
 | "rejected the bot's API key" | Wrong key, or for Wizarr the key was deleted. Create a new one |
 | Status board not updating | The bot needs Send Messages, Embed Links and Read Message History in that channel |
