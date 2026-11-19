@@ -1,0 +1,36 @@
+# Unraid: prefer the Unraid template (unraid/mediahub-bot.xml, see README).
+# This file is for the Docker Compose Manager plugin or plain `docker compose up -d`.
+
+services:
+  mediahub-bot:
+    image: ghcr.io/nogref/mediahub-bot:latest
+    # To build locally instead of pulling: comment out `image` and uncomment `build`.
+    # build: .
+    container_name: mediahub-bot
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PUID: "99" # nobody:users, Unraid's appdata owner
+      PGID: "100"
+    volumes:
+      - /mnt/user/appdata/mediahub-bot:/data
+    # Only needed if something OUTSIDE the Docker network posts webhooks
+    # (e.g. Plex/Tautulli in host network mode). Containers on the same
+    # network reach the bot at http://mediahub-bot:8787 without this.
+    ports:
+      - "8787:8787"
+    networks:
+      - media
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  media:
+    # A user-defined network that your Seerr/*arr/Tautulli/Aurral/Wizarr
+    # containers are also attached to, so container names resolve.
+    # Create it once with:  docker network create media
+    # (Unraid's built-in "bridge" network does NOT resolve container names.)
+    external: true
