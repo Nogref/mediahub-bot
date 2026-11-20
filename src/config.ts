@@ -21,7 +21,7 @@ export interface Config {
   guildId: string;
   adminRoleId?: string;
   /** Channels can also be set from Discord with /setup channels (stored in the DB, wins over env). */
-  channels: { status?: string; notify?: string; admin?: string; music?: string };
+  channels: { status?: string; notify?: string; admin?: string; music?: string; redownloadLog?: string };
   /** Public links shown to members; also settable with /setup links. */
   links: { aurral?: string; plezyRelay?: string };
   /** Ping roles. Unset ones are created by /setup and remembered in the DB. */
@@ -60,6 +60,15 @@ export interface Config {
     slowMs: number;
   };
   stats: { refreshMinutes: number };
+  redownload: {
+    dailyLimit: number;
+    titleCooldownHours: number;
+    maxActive: number;
+    maxAttempts: number;
+    attemptTimeoutHours: number;
+  };
+  /** plex.tv base URL (only overridden in tests). */
+  plexTvUrl: string;
   /** Present in the requested env contract; no feature reads it yet (see README). */
   promoteSecret?: string;
 }
@@ -211,6 +220,7 @@ export function loadConfig(): Config {
       notify: env("NOTIFY_CHANNEL_ID"),
       admin: env("ADMIN_CHANNEL_ID"),
       music: env("MUSIC_NOTIFY_CHANNEL_ID"),
+      redownloadLog: env("REDOWNLOAD_LOG_CHANNEL_ID"),
     },
     links: {
       aurral: url("AURRAL_PUBLIC_URL"),
@@ -282,6 +292,14 @@ export function loadConfig(): Config {
       slowMs: num("STATUS_SLOW_MS", 2000, 100),
     },
     stats: { refreshMinutes: num("STATS_REFRESH_MINUTES", 30, 5) },
+    redownload: {
+      dailyLimit: num("REDOWNLOAD_DAILY_LIMIT", 2, 0),
+      titleCooldownHours: num("REDOWNLOAD_TITLE_COOLDOWN_HOURS", 48, 0),
+      maxActive: num("REDOWNLOAD_MAX_ACTIVE", 3, 1),
+      maxAttempts: num("REDOWNLOAD_MAX_ATTEMPTS", 3, 1),
+      attemptTimeoutHours: num("REDOWNLOAD_ATTEMPT_TIMEOUT_HOURS", 24, 1),
+    },
+    plexTvUrl: url("PLEX_TV_URL") ?? "https://plex.tv",
     promoteSecret: env("PROMOTE_SECRET"),
   };
 

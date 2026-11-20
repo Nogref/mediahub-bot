@@ -20,7 +20,7 @@ const raw = `https://raw.githubusercontent.com/${OWNER}/${REPO}/main`;
 const REQUIRED = new Set(["DISCORD_TOKEN", "GUILD_ID"]);
 const SKIP = new Set(["DATA_DIR"]); // fixed to the /data path mapping below
 // Shown by default; everything else sits behind Unraid's "Show more settings".
-const ALWAYS = /^(DISCORD_TOKEN|GUILD_ID|ADMIN_ROLE_ID|INVITER_ROLE_ID|[A-Z]+_CHANNEL_ID|WEBHOOK_SECRET|[A-Z]+_URL|[A-Z]+_API_KEY|PLEX_TOKEN|SUBSONIC_USER|SUBSONIC_PASSWORD)$/;
+const ALWAYS = /^(DISCORD_TOKEN|GUILD_ID|ADMIN_ROLE_ID|INVITER_ROLE_ID|[A-Z_]+_CHANNEL_ID|WEBHOOK_SECRET|[A-Z]+_URL|[A-Z]+_API_KEY|PLEX_TOKEN|SUBSONIC_USER|SUBSONIC_PASSWORD)$/;
 const MASK = /(TOKEN|KEY|SECRET|PASSWORD)$/;
 
 const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");

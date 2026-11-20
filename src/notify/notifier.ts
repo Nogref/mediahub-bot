@@ -25,6 +25,7 @@ export class Notifier {
   private recentAlerts = new TtlCache<string, true>(ALERT_DEDUPE_MS);
   private stopped = false;
   private listeners: Array<(ev: InboundEvent) => void> = [];
+  private alertFilters: Array<(ev: AlertEvent) => boolean> = [];
 
   constructor(
     private readonly client: Client,
@@ -49,6 +50,19 @@ export class Notifier {
     this.listeners.push(fn);
   }
 
+  /**
+   * Treat these items as already announced for a while (used when a broken
+   * file is swapped for a fresh copy, which isn't news).
+   */
+  suppress(dedupeKeys: string[], ttlMs: number): void {
+    for (const k of dedupeKeys) this.recentMedia.set(k, true, ttlMs);
+  }
+
+  /** Drop alerts another feature already covers (e.g. downloads the redownload log tracks). */
+  addAlertFilter(fn: (ev: AlertEvent) => boolean): void {
+    this.alertFilters.push(fn);
+  }
+
   /** Queue events; they're posted when the channel's batch window closes. */
   publish(events: InboundEvent[]): void {
     for (const ev of events) {
@@ -60,6 +74,10 @@ export class Notifier {
         }
       }
       if (ev.type === "issue") continue;
+      if (ev.type === "alert" && this.alertFilters.some((f) => f(ev))) {
+        log.debug(`notify: alert "${ev.title}" handled elsewhere, not posting`);
+        continue;
+      }
       const channelId = ev.type === "media" ? this.channelFor(ev) : this.alertChannel;
       if (!channelId) {
         log.debug(`notify: no channel configured for ${ev.type} event "${ev.dedupeKey}", dropping`);

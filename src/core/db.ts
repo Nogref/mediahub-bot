@@ -185,6 +185,11 @@ export class Store {
     this.db.close();
   }
 
+  /** Raw handle for feature-owned tables (see src/redownload/store.ts). */
+  get sql(): Database.Database {
+    return this.db;
+  }
+
   // ---- key/value -----------------------------------------------------------
   kvGet<T>(key: string): T | undefined {
     const row = this.db.prepare("SELECT value FROM kv WHERE key = ?").get(key) as { value: string } | undefined;

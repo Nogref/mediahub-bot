@@ -22,6 +22,8 @@ export function fakeConfig(overrides = {}) {
     music: { primary: "lidarr" },
     notify: { batchSeconds: 60, dedupeHours: 6, reconcileMinutes: 10, trackDays: 30 },
     status: { intervalSeconds: 60, refreshMinutes: 5, failThreshold: 2, slowMs: 2000 },
+    redownload: { dailyLimit: 2, titleCooldownHours: 48, maxActive: 3, maxAttempts: 3, attemptTimeoutHours: 24 },
+    plexTvUrl: "http://127.0.0.1:9/plextv",
     ...overrides,
   };
 }

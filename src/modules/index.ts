@@ -11,8 +11,10 @@ import { music } from "./music.js";
 import { musicRequests } from "./musicRequests.js";
 import { myRequests } from "./myRequests.js";
 import { pings } from "./pings.js";
+import { plexLink } from "./plexLink.js";
 import { posts } from "./posts.js";
 import { random } from "./random.js";
+import { redownload } from "./redownload.js";
 import { report } from "./report.js";
 import { requestTracker } from "./requestTracker.js";
 import { settings } from "./settings.js";
@@ -27,6 +29,8 @@ export const moduleFactories: ModuleFactory[] = [
   aurralAccounts, // /aurral signup|create|link|account
   myRequests, //    /requests                    → your requests + live progress
   report, //        /report                      → Seerr issues, DM when fixed
+  plexLink, //      /plex link|status|unlink      → confirms members are on the Plex server
+  redownload, //    /redownload …                 → members replace broken files themselves
   webhooks, //      POST /webhook/:service       → batched announcements + @mentions
   requestTracker, // polls pending bot requests  → @mentions if a webhook was missed
   statusBoard, //   live board, /statusboard, /status

@@ -71,7 +71,9 @@ test("command set: everything registers, descriptions are valid, gates set", () 
     "/aurral account", "/aurral create", "/aurral link", "/aurral signup",
     "/help", "/invite create", "/invite list", "/invite revoke",
     "/music play", "/music queue", "/music radio", "/music shuffle", "/music skip", "/music stop",
-    "/pings", "/plezy", "/random movie", "/report",
+    "/pings", "/plex link", "/plex linked", "/plex remove", "/plex status", "/plex unlink", "/plezy", "/random movie",
+    "/redownload approvals", "/redownload ban", "/redownload cancel", "/redownload history", "/redownload overview",
+    "/redownload pause", "/redownload resume", "/redownload start", "/redownload status", "/redownload unban", "/report",
     "/request album", "/request movie", "/request series", "/requests",
     "/setup channels", "/setup edit", "/setup links", "/setup nowplaying", "/setup pings", "/setup plezy", "/setup reset", "/setup show", "/setup stats", "/setup welcome",
     "/stats", "/status", "/statusboard post", "/statusboard repost",
@@ -82,6 +84,10 @@ test("command set: everything registers, descriptions are valid, gates set", () 
   assert.equal(gated["/aurral link"], "admin");
   assert.equal(gated["/statusboard repost"], "admin");
   for (const u of usages.filter((x) => x.startsWith("/setup "))) assert.equal(gated[u], "admin", u);
+  for (const u of ["/redownload pause", "/redownload resume", "/redownload ban", "/redownload unban", "/redownload approvals", "/redownload history", "/redownload overview", "/plex linked", "/plex remove"]) {
+    assert.equal(gated[u], "admin", u);
+  }
+  for (const u of ["/redownload start", "/redownload status", "/redownload cancel", "/plex link"]) assert.equal(gated[u], undefined, u);
   // Music and requests are open to everyone.
   for (const u of ["/request album", "/music play", "/aurral signup", "/request movie", "/pings", "/plezy"]) assert.equal(gated[u], undefined, u);
 });

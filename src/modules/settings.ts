@@ -17,6 +17,7 @@ const CHANNELS: Array<{ key: ChannelKey; option: string; label: string; help: st
   { key: "status", option: "status", label: "Status board", help: "Live service status board + down/up heads-ups" },
   { key: "admin", option: "admin", label: "Admin notices", help: "Health issues, failed downloads, reports, invite log" },
   { key: "music", option: "music_announcements", label: "Music announcements", help: "Optional separate channel for new albums" },
+  { key: "redownloadLog", option: "redownload_log", label: "Redownload log", help: "Every redownload, with Cancel/Approve/Ban buttons (admins only)" },
 ];
 
 const LINKS: Array<{ key: LinkKey; option: string; label: string; help: string }> = [

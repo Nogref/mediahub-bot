@@ -121,7 +121,11 @@ export const report: ModuleFactory = ({ services, store, cfg, client, notifier }
     ]);
 
     const link = cfg.seerr?.publicUrl ? `\n${cfg.seerr.publicUrl}/issues/${issue.id}` : "";
-    await i.editReply(`📝 Reported **${truncate(title, 80)}**${where} to Seerr (issue #${issue.id}). I'll DM you when it's fixed.${link}`);
+    const selfFix =
+      (problem === "video" || problem === "audio") && (type === "movie" ? cfg.radarr?.apiKey : cfg.sonarr?.apiKey)
+        ? "\n-# Tip: if the file itself is broken, `/redownload start` swaps in a fresh copy without waiting for an admin."
+        : "";
+    await i.editReply(`📝 Reported **${truncate(title, 80)}**${where} to Seerr (issue #${issue.id}). I'll DM you when it's fixed.${link}${selfFix}`);
     log.info(`report: ${i.user.id} opened Seerr issue #${issue.id} (${problem}) on ${title}`);
   }
 

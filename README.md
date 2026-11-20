@@ -1,11 +1,11 @@
 # MediaHub bot
 
-A self-hosted Discord bot for a Plex + Seerr + Radarr/Sonarr + Tautulli + Lidarr/Aurral + Wizarr stack. Friends request movies, shows and albums from Discord, get @-mentioned when their request is ready, report broken files, and pick which announcements ping them. They can also play your music library in a voice channel. Admins get a live status board, and admins and trusted "Inviters" hand out Wizarr invites.
+A self-hosted Discord bot for a Plex + Seerr + Radarr/Sonarr + Tautulli + Lidarr/Aurral + Wizarr stack. Friends request movies, shows and albums from Discord, get @-mentioned when their request is ready, report broken files or replace them themselves, and pick which announcements ping them. They can also play your music library in a voice channel. Admins get a live status board, and admins and trusted "Inviters" hand out Wizarr invites.
 
 Two rules shape the design:
 
-1. **The bot is a thin shell.** Seerr, Radarr, Sonarr, Lidarr, Aurral and Wizarr do all the work. If the bot is stopped, nothing in the media pipeline notices. The bot only keeps a small SQLite file: the status-board message ID, who requested what, and invite nicknames.
-2. **No approval gates for movies and TV.** Every Discord member is trusted. Requests go to Seerr with its admin API key, so Seerr auto-approves them. There's no approval queue, admin confirmation or quota.
+1. **The bot is a thin shell.** Seerr, Radarr, Sonarr, Lidarr, Aurral and Wizarr do all the work. If the bot is stopped, nothing in the media pipeline notices. The bot only keeps a small SQLite file: the status-board message ID, who requested what, invite nicknames, which Plex account each member linked (never their Plex sign-in), and the redownload log.
+2. **No approval gates for movies and TV.** Every Discord member is trusted. Requests go to Seerr with its admin API key, so Seerr auto-approves them. There's no approval queue, admin confirmation or quota. (Self-serve *redownloads* are different: they delete files, so they have limits and an optional approve-first switch.)
 
 ## Commands
 
@@ -20,6 +20,9 @@ Two rules shape the design:
 | `/music radio` · `queue` · `skip` · `shuffle` · `stop` | everyone | Radio mode and queue control. The now-playing card also has buttons |
 | `/aurral signup [username]` | everyone | Creates your own Aurral account and DMs you the login (works in Subsonic apps too) |
 | `/aurral account` | everyone | Your Aurral username, the address, and how to listen in apps |
+| `/redownload start <title> <problem> <details> [season] [episode]` | everyone, Plex-linked | Replace a broken movie, episode, whole season or album with a fresh copy. Shows the replacement first; you can pick a different release |
+| `/redownload status` · `cancel` | everyone | Your redownloads, how many you have left, and stopping one before anything is replaced |
+| `/plex link` · `status` · `unlink` | everyone | Connect your Plex account with one sign-in (confirms you're on the server; your Plex sign-in isn't kept) |
 | `/plezy` | everyone | Posts the Plezy guide **publicly** in the current channel (for "how do I watch?" questions) |
 | `/pings` | everyone | Choose which announcements @-ping you (Movies, TV, Music, Server status) |
 | `/status` · `/stats` · `/random movie` · `/help` | everyone | Service check, library numbers, a random movie, command list |
@@ -32,6 +35,9 @@ Two rules shape the design:
 | `/setup channels` · `/setup links` · `/setup show` | 🔒 admin | Set channels and public links from Discord; show the current setup |
 | `/aurral link user:@x username:…` | 🔒 admin | Connect a member to an Aurral account they already have |
 | `/statusboard repost` | 🔒 admin | Abandons the old status board and posts a fresh one |
+| `/redownload overview` · `history [user]` | 🔒 admin | Settings, safety checks (recycling bins), what's running; recent redownloads |
+| `/redownload pause` · `resume` · `ban` · `unban` · `approvals on/off` | 🔒 admin | Stop everyone or one member, or require an admin to approve each redownload |
+| `/plex linked` · `/plex remove user:@x` | 🔒 admin | Who's linked to which Plex account; unlink someone |
 
 🎟️ = admins and the Inviter role. 🔒 = admins. Everything else is open to every member.
 
@@ -293,6 +299,34 @@ Aurral has no invite links, but its admin API can create users, so the bot does 
 - **`/requests`** lists what you've asked for through the bot. For items still on the way it shows live progress: Seerr's Radarr/Sonarr download percentage and ETA, Lidarr's queue and track count, or Aurral's download state. After 3 days with nothing found it says so, instead of leaving you guessing. Below that are items that landed in the last two weeks.
 - **`/report`** autocompletes titles that are in the library, takes a problem type (video, audio, subtitles, other), a description and an optional season/episode, and files a **Seerr issue** under your Seerr user if your Discord ID is linked there. Admins see it in the admin channel and handle it in Seerr as usual. When it's marked **resolved**, the reporter gets a DM, either straight away via Seerr's *Issue Resolved* webhook or within `REQUEST_RECONCILE_MINUTES` from the bot's own check. If their DMs are closed, they get a mention in the announcements channel instead.
 
+## Self-serve redownloads
+
+Members fix broken files themselves instead of waiting for an admin. It's built to be hard to misuse and to never leave a title worse off.
+
+**Setup (once):**
+1. Add `RADARR_API_KEY` and `SONARR_API_KEY` (Lidarr is already set up for albums).
+2. In Radarr, Sonarr and Lidarr, set a **Recycling Bin**: Settings → Media Management → File Management (show advanced). Without one the apps delete files permanently, so the bot refuses to redownload anything from that app. `/redownload overview` shows a ✅ per app.
+3. Make a private admin channel and run `/setup channels redownload_log:#that-channel` (falls back to the admin channel).
+4. Members run `/plex link` once.
+
+**Who can use it:** members whose linked Plex account is on your server's share list (re-checked every 6 hours, so removing someone in Plex locks them out). Admins always can, without limits. If a Plex account is already linked to another Discord member, it can't be linked again.
+
+**Limits:** 2 per member per rolling 24 hours (a whole season counts as 2), 48 hours before the same title can be redone, 3 running at once server-wide. Anything that ends without changing a file (no release found, all downloads failed, cancelled, denied) is refunded. All of these are in `.env.example` (`REDOWNLOAD_*`).
+
+**What happens:**
+1. The member picks the title (autocomplete across Radarr, Sonarr and Lidarr), a problem type and a description. For TV, a season is required; leaving the episode empty means the whole season.
+2. The bot runs an interactive search in the app and keeps only releases the app rejected *purely* because a file already exists. So it never picks something your quality profile doesn't want, a blocklisted release, the same release as the current file, a sample or fake (too small), or a dead torrent. Seasons only take season packs; single episodes never do. Best quality first, then custom-format score, then seeders.
+3. The member sees what's on Plex now vs. the replacement, and can **Pick a different release** from the top 10.
+4. The app downloads it. **The old file stays playable the whole time.**
+5. When the download is finished and the app says the *only* thing stopping the import is the existing file, the bot moves just the files the new download replaces to the recycling bin (for a season, only episodes actually in the pack) and the app imports the new one.
+6. The old release is blocklisted so it's never grabbed again. The member gets a DM (or a mention in the announcements channel if DMs are closed). The bot doesn't announce the fresh copy as "new on Plex".
+
+If a download fails, imports with a different problem or takes over 24 hours, it's removed and blocklisted, and the next release is tried (3 in total). The original is untouched until step 5. If the import doesn't happen within 20 minutes after the swap, the job goes to 🆘 **needs admin**: the log pings the admin role with where the old file is (recycling bin) and how to finish it (the app's Activity → Queue → Manual Import). Jobs survive bot restarts.
+
+**The log:** one message per redownload in the log channel, edited as it goes: who (Discord + Plex username), what, the problem and description, old vs. new release and a timeline. Buttons: **Cancel** (before the swap), **Approve / Deny** (approve-first mode), **Mark resolved** (needs admin) and **Ban requester**. The apps' own "manual interaction required" / "download failed" alerts for these downloads are kept out of the admin channel, since the log already covers them.
+
+**Admin controls:** `/redownload pause [reason]` / `resume`, `ban user [reason]` / `unban`, `approvals on|off` (each redownload waits for Approve; auto-denied after 24 hours), `history [user]`, `overview`.
+
 ## Music streaming
 
 `/music` plays your library from a **Subsonic server** into the voice channel you're in. That can be Aurral's built-in one (the default: `SUBSONIC_URL` falls back to `AURRAL_URL`) or Navidrome.
@@ -412,6 +446,7 @@ src/
                         access gates, ping roles, Discord-side settings, live messages
   services/             one thin API client per service (incl. Subsonic)
   modules/              one file per feature (see table above)
+  redownload/           /redownload: app adapters, release picking, limits, the job state machine
   music/                voice session (queue, playback, now-playing message)
   notify/               event types, batching notifier, embed rendering
   webhooks/             one payload parser per sender
@@ -438,6 +473,9 @@ docker-entrypoint.sh    fixes /data ownership for PUID:PGID, then drops root
 | Ping buttons say "not allowed to change that role" | Move the bot's role above the ping roles in Server Settings → Roles |
 | `/music` says the server "didn't send Opus audio" | Enable Opus transcoding on the Subsonic server (Navidrome: Settings → Transcoding) |
 | Bot joins voice but there's no sound | Check it has **Speak** in that channel, and that the Subsonic user can stream (try the same account in a Subsonic app) |
+| `/redownload` says redownloads "aren't fully set up" | The app has no Recycling Bin. Set it (see Self-serve redownloads); `/redownload overview` shows which app |
+| `/plex link` says the account isn't on the share list | They signed in with a different Plex account than the one you shared with, or the invite isn't accepted yet. Once fixed, they run `/plex link` again |
+| A redownload says 🆘 needs admin | Follow the log entry: finish the import in the app's Activity → Queue → Manual Import (or restore the old file from the recycling bin), then press **Mark resolved** |
 | Unraid can't pull the image | Make the GHCR package public, or `docker login ghcr.io` (see section 4) |
 
 ## Not used
