@@ -21,6 +21,7 @@ Two rules shape the design:
 | `/aurral [username]` | everyone | Your own Aurral music account: creates it and DMs you the login (works in Subsonic apps too), or shows your login if you have one |
 | `/redownload start <title> <problem> <details> [season] [episode]` | everyone | Replace a broken movie, episode, whole season or album with a fresh copy. Shows the replacement first; you can pick a different copy |
 | `/redownload status` | everyone | Your live redownload tracker(s), with Refresh/Cancel buttons, and how many you have left |
+| `/suggest` | everyone | Share an idea in a short form. The bot posts it in the suggestions channel (after a family-friendly check) for others to 👍, and DMs you when an admin responds |
 | `/plex` | everyone | Link your Plex account with one sign-in, or see/unlink the one you linked (your Plex sign-in isn't kept) |
 | `/plezy` | everyone | Posts the Plezy guide **publicly** in the current channel (for "how do I watch?" questions) |
 | `/pings` | everyone | Choose which announcements @-ping you (Movies, TV, Music, Server status) |
@@ -34,6 +35,7 @@ Two rules shape the design:
 | `/admin redownloads overview` · `history [user]` | 🔒 admin | Settings, safety checks (recycling bins), what's running; recent redownloads |
 | `/admin redownloads pause` · `resume` · `ban` · `unban` · `approvals` · `plexcheck` | 🔒 admin | Stop everyone or one member, require an admin to approve each redownload, or require a linked Plex account (off by default) |
 | `/admin plex linked` · `/admin plex unlink user:@x` | 🔒 admin | Who's linked to which Plex account; unlink someone |
+| `/admin suggestions top` · `review on/off` | 🔒 admin | Most-liked open ideas; or have every suggestion wait for an admin before it's posted |
 | `/admin aurral link user:@x username:…` | 🔒 admin | Connect a member to an Aurral account they already have |
 
 🎟️ = admins and the Inviter role. 🔒 = admins. Everything else is open to every member.
@@ -327,6 +329,23 @@ If a download fails, imports with a different problem or takes over 24 hours, it
 **The log:** one message per redownload in the log channel, edited as it goes: who (Discord + Plex username), what, the problem and description, old vs. new release and a timeline. Buttons: **Cancel** (before the swap), **Approve / Deny** (approve-first mode), **Mark resolved** (needs admin) and **Ban requester**. The apps' own "manual interaction required" / "download failed" alerts for these downloads are kept out of the admin channel, since the log already covers them.
 
 **Admin controls:** `/admin redownloads pause [reason]` / `resume`, `ban user [reason]` / `unban`, `approvals on|off` (each redownload waits for Approve; auto-denied after 24 hours), `plexcheck on|off` (require `/plex`; off by default), `history [user]`, `overview`.
+
+## Suggestions, and a chat-free server
+
+`/suggest` lets members share ideas without anyone typing in a channel, so you can make the whole server read-only (handy if family members use it and you don't want them seeing everyone's banter).
+
+**How it works:** the member fills in a short form (the idea, plus optional details). The bot checks it with a family-friendly filter, then posts it in your suggestions channel with a **👍** button. Tapping 👍 again takes the vote back, and the bot tells them which one happened. Admins press **🔒 Admins** on a post to set *Looking into it*, *Done* or *Not planned* with an optional note (the member gets a DM and the post updates; voting closes once it's done or declined), or to remove it without notifying anyone. Members can share up to 3 ideas a day; admins are unlimited.
+
+**The filter:** Discord's AutoMod doesn't check messages the bot posts, so the bot runs its own check (swearing, slurs and sexual terms, including l33t-speak like `sh1t`). Caught text is never posted: the member can **Reword it** (their text comes back filled in) or **Send to admins**, for false alarms like a title such as *Moby Dick*. Those land in the admin channel flagged ⚠️, with **Post it** / **Don't post** buttons. `/admin suggestions review on` sends *every* suggestion there first. Display names that fail the check show as "A member".
+
+**Setup:** `/setup channels suggestions:#suggestions`.
+
+**Making the server chat-free:**
+1. For each text channel, edit **@everyone**: turn **Send Messages** (and **Create Threads**) off; leave **View Channel** and **Use Application Commands** on. Every bot command still works there, and the bot's replies are private, so nobody sees anyone else's requests.
+2. Make sure the bot itself can **Send Messages** and **Embed Links** in the suggestions, announcements and status channels.
+3. If some people do want to chat: make a "Chat" role, let only that role see a chat channel, and don't give it to the people who shouldn't see it. They won't even know the channel exists.
+4. For any channel where people can still type, turn on **AutoMod** (Server Settings → AutoMod, desktop only) with the *Commonly Flagged Words* lists set to block the message. It misses mild swearing, so add your own words too.
+5. Anyone who shouldn't get DMs from other members can turn off *Allow direct messages from server members* in that server's privacy settings.
 
 ## Music streaming
 

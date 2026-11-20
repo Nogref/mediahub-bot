@@ -54,10 +54,11 @@ export function helpModule(getLines: () => HelpLine[]): ModuleFactory {
         ],
       },
       {
-        title: "🛠️ Something wrong with a file?",
+        title: "🛠️ Problems & ideas",
         entries: [
           { cmds: ["/redownload start", "/redownload status"], text: "Swap a broken file for a fresh copy yourself, and check on it" },
           { cmds: ["/report"], text: "Tell the admins about a problem" },
+          { cmds: ["/suggest"], text: "Share an idea for the server. Others can 👍 it" },
         ],
       },
       {
@@ -98,6 +99,7 @@ export function helpModule(getLines: () => HelpLine[]): ModuleFactory {
           { cmds: ["/setup show"], display: "`/setup …`", covers: ["/setup "], text: "Channels, posts, boards and links. Start with `/setup show`" },
           { cmds: ["/admin redownloads overview"], display: "`/admin redownloads …`", covers: ["/admin redownloads "], text: "Limits, pause, bans, approvals, history. Start with `overview`" },
           { cmds: ["/admin plex linked"], display: "`/admin plex …`", covers: ["/admin plex "], text: "Who's linked their Plex account" },
+          { cmds: ["/admin suggestions top"], display: "`/admin suggestions …`", covers: ["/admin suggestions "], text: "Most-liked ideas, and review-before-posting" },
           { cmds: ["/admin aurral link"], display: "`/admin aurral link`", text: "Connect an existing music account to a member" },
         ],
       },

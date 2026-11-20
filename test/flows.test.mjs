@@ -71,13 +71,14 @@ test("command set: everything registers, gates set, admin-only commands hidden f
     "/admin aurral link", "/admin plex linked", "/admin plex unlink",
     "/admin redownloads approvals", "/admin redownloads ban", "/admin redownloads history", "/admin redownloads overview",
     "/admin redownloads pause", "/admin redownloads plexcheck", "/admin redownloads resume", "/admin redownloads unban",
+    "/admin suggestions review", "/admin suggestions top",
     "/aurral", "/help", "/invite aurral", "/invite create", "/invite list", "/invite revoke",
     "/music play", "/music queue", "/music radio", "/music shuffle", "/music skip", "/music stop",
     "/pings", "/plex", "/plezy", "/random movie", "/redownload start", "/redownload status", "/report",
     "/request album", "/request movie", "/request series", "/requests",
     "/setup channels", "/setup edit", "/setup links", "/setup nowplaying", "/setup pings", "/setup plezy", "/setup reset", "/setup show",
     "/setup stats", "/setup statusboard", "/setup welcome",
-    "/stats", "/status",
+    "/stats", "/status", "/suggest",
   ].sort());
   const gated = Object.fromEntries(registry.help.filter((h) => h.gate).map((h) => [h.usage, h.gate]));
   for (const u of ["/invite create", "/invite list", "/invite revoke", "/invite aurral"]) assert.equal(gated[u], "inviter", u);
@@ -98,9 +99,10 @@ test("missing services drop their commands", () => {
   const { registry } = setup({ lidarr: undefined, aurral: undefined, wizarr: undefined, plex: undefined, channels: { notify: "c" } });
   const usages = registry.help.map((h) => h.usage).sort();
   assert.deepEqual(usages, [
+    "/admin suggestions review", "/admin suggestions top",
     "/help", "/pings", "/plezy", "/report", "/request movie", "/request series", "/requests",
     "/setup channels", "/setup edit", "/setup links", "/setup pings", "/setup plezy", "/setup reset", "/setup show", "/setup stats", "/setup statusboard", "/setup welcome",
-    "/stats", "/status",
+    "/stats", "/status", "/suggest",
   ]);
 });
 
@@ -112,7 +114,7 @@ test("/help: short, grouped, plain-language; admin and inviter sections only for
   };
   const member = await help();
   const names = member.fields.map((f) => f.name);
-  assert.deepEqual(names, ["🎬 Get something new", "🛠️ Something wrong with a file?", "🎵 Music", "ℹ️ Good to know"]);
+  assert.deepEqual(names, ["🎬 Get something new", "🛠️ Problems & ideas", "🎵 Music", "ℹ️ Good to know"]);
   const text = JSON.stringify(member);
   assert.match(text, /`\/request movie` · `series` · `album`/);
   assert.doesNotMatch(text, /\/setup|\/admin|\/invite|Seerr|Radarr|Sonarr|Lidarr|Wizarr/);

@@ -21,7 +21,7 @@ export interface Config {
   guildId: string;
   adminRoleId?: string;
   /** Channels can also be set from Discord with /setup channels (stored in the DB, wins over env). */
-  channels: { status?: string; notify?: string; admin?: string; music?: string; redownloadLog?: string };
+  channels: { status?: string; notify?: string; admin?: string; music?: string; redownloadLog?: string; suggestions?: string };
   /** Public links shown to members; also settable with /setup links. */
   links: { aurral?: string; plezyRelay?: string };
   /** Ping roles. Unset ones are created by /setup and remembered in the DB. */
@@ -221,6 +221,7 @@ export function loadConfig(): Config {
       admin: env("ADMIN_CHANNEL_ID"),
       music: env("MUSIC_NOTIFY_CHANNEL_ID"),
       redownloadLog: env("REDOWNLOAD_LOG_CHANNEL_ID"),
+      suggestions: env("SUGGESTIONS_CHANNEL_ID"),
     },
     links: {
       aurral: url("AURRAL_PUBLIC_URL"),

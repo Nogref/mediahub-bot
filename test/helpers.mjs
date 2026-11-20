@@ -166,6 +166,7 @@ export function fakeInteraction({ options = {}, customId, userId = "u1", roles =
     async editReply(p) { log.push({ type: "edit", p: typeof p === "string" ? { content: p } : p }); },
     async update(p) { log.push({ type: "update", p }); },
     async showModal(m) { log.push({ type: "modal", m: m.toJSON() }); },
+    async followUp(p) { log.push({ type: "followUp", p: typeof p === "string" ? { content: p } : p }); },
     async respond(c) { log.push({ type: "autocomplete", c }); },
     last() { return log.filter((l) => l.type === "edit" || l.type === "reply" || l.type === "update").at(-1)?.p; },
   };
