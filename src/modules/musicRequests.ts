@@ -318,9 +318,9 @@ export const musicRequests: ModuleFactory = ({ services, store, cfg }) => {
     subcommands: [
       {
         parent: "request",
-        parentDescription: "Request movies, series or albums",
+        parentDescription: "Ask for a movie, TV show or album",
         name: "album",
-        description: `Request an album (goes to ${NAMES[order[0]]}${order[1] ? `, falls back to ${NAMES[order[1]]}` : ""})`,
+        description: "Ask for an album. It's added to the music library automatically",
         build: (b) => b.addStringOption((o) => o.setName("query").setDescription("Album and/or artist name").setRequired(true).setMaxLength(100)),
         execute: command,
       },

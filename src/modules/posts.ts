@@ -54,13 +54,14 @@ export const DEFAULT_POSTS: Record<PostName, PostContent> = {
         "You'll get an @-mention here when something you asked for is ready.",
       "**🎵 Music**\n" +
         "`/music play` plays our library in whatever voice channel you're in, and `/music radio` plays random songs.\n" +
-        "`/aurral signup` gets you your own Aurral account to stream on your phone or computer: {aurral}\n\n" +
+        "`/aurral` gets you your own Aurral account to stream on your phone or computer: {aurral}\n\n" +
         "**📺 Watching**\n" +
         "We recommend the **Plezy** app, including Watch Together for movie nights. Tap the button below or type `/plezy`.",
       "**🛠️ Something wrong?**\n" +
-        "`/report` a broken file (bad audio, missing subtitles…) and you'll get a DM when it's fixed. `/status` shows whether everything's up.\n\n" +
+        "File glitchy or the audio's off? `/redownload start` swaps in a fresh copy and keeps you posted in your DMs. For anything else (missing subtitles, wrong info…), `/report` it and you'll get a DM when it's fixed. `/status` shows whether everything's up.\n\n" +
         "**🔔 Pings**\n" +
-        "Use the button below (or `/pings`) to choose which announcements ping you. Requests you make yourself always ping you.",
+        "Use the button below (or `/pings`) to choose which announcements ping you. Requests you make yourself always ping you.\n\n" +
+        "Lost? Type `/help` for everything I can do.",
     ],
   },
   plezy: {

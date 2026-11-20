@@ -64,32 +64,34 @@ function click(registry, customId, extra = {}) {
   return registry.handle(i).then(() => i);
 }
 
-test("command set: everything registers, descriptions are valid, gates set", () => {
+test("command set: everything registers, gates set, admin-only commands hidden from members", () => {
   const { registry } = setup({ subsonic: { url: `${mock.base}/aurral`, user: "bot", password: "pw", bitrate: 128, idleMinutes: 5 } });
   const usages = registry.help.map((h) => h.usage).sort();
   assert.deepEqual(usages, [
-    "/aurral account", "/aurral create", "/aurral link", "/aurral signup",
-    "/help", "/invite create", "/invite list", "/invite revoke",
+    "/admin aurral link", "/admin plex linked", "/admin plex unlink",
+    "/admin redownloads approvals", "/admin redownloads ban", "/admin redownloads history", "/admin redownloads overview",
+    "/admin redownloads pause", "/admin redownloads plexcheck", "/admin redownloads resume", "/admin redownloads unban",
+    "/aurral", "/help", "/invite aurral", "/invite create", "/invite list", "/invite revoke",
     "/music play", "/music queue", "/music radio", "/music shuffle", "/music skip", "/music stop",
-    "/pings", "/plex link", "/plex linked", "/plex remove", "/plex status", "/plex unlink", "/plezy", "/random movie",
-    "/redownload approvals", "/redownload ban", "/redownload cancel", "/redownload history", "/redownload overview",
-    "/redownload pause", "/redownload plexcheck", "/redownload resume", "/redownload start", "/redownload status", "/redownload unban", "/report",
+    "/pings", "/plex", "/plezy", "/random movie", "/redownload start", "/redownload status", "/report",
     "/request album", "/request movie", "/request series", "/requests",
-    "/setup channels", "/setup edit", "/setup links", "/setup nowplaying", "/setup pings", "/setup plezy", "/setup reset", "/setup show", "/setup stats", "/setup welcome",
-    "/stats", "/status", "/statusboard post", "/statusboard repost",
-  ]);
+    "/setup channels", "/setup edit", "/setup links", "/setup nowplaying", "/setup pings", "/setup plezy", "/setup reset", "/setup show",
+    "/setup stats", "/setup statusboard", "/setup welcome",
+    "/stats", "/status",
+  ].sort());
   const gated = Object.fromEntries(registry.help.filter((h) => h.gate).map((h) => [h.usage, h.gate]));
-  assert.equal(gated["/invite create"], "inviter");
-  assert.equal(gated["/aurral create"], "inviter");
-  assert.equal(gated["/aurral link"], "admin");
-  assert.equal(gated["/statusboard repost"], "admin");
-  for (const u of usages.filter((x) => x.startsWith("/setup "))) assert.equal(gated[u], "admin", u);
-  for (const u of ["/redownload pause", "/redownload plexcheck", "/redownload resume", "/redownload ban", "/redownload unban", "/redownload approvals", "/redownload history", "/redownload overview", "/plex linked", "/plex remove"]) {
-    assert.equal(gated[u], "admin", u);
-  }
-  for (const u of ["/redownload start", "/redownload status", "/redownload cancel", "/plex link"]) assert.equal(gated[u], undefined, u);
-  // Music and requests are open to everyone.
-  for (const u of ["/request album", "/music play", "/aurral signup", "/request movie", "/pings", "/plezy"]) assert.equal(gated[u], undefined, u);
+  for (const u of ["/invite create", "/invite list", "/invite revoke", "/invite aurral"]) assert.equal(gated[u], "inviter", u);
+  for (const u of usages.filter((x) => x.startsWith("/setup ") || x.startsWith("/admin "))) assert.equal(gated[u], "admin", u);
+  // Everything else is open to every member.
+  for (const u of usages.filter((x) => !/^\/(setup|admin|invite) /.test(x))) assert.equal(gated[u], undefined, u);
+
+  // Members don't even see /setup and /admin in the slash menu.
+  const perms = Object.fromEntries(registry.json.map((c) => [c.name, c.default_member_permissions]));
+  assert.equal(perms.setup, "32");
+  assert.equal(perms.admin, "32");
+  for (const [name, p] of Object.entries(perms)) if (name !== "setup" && name !== "admin") assert.equal(p ?? undefined, undefined, name);
+  // Grouped admin commands are routable.
+  assert.ok(registry.json.find((c) => c.name === "admin").options.some((o) => o.type === 2 && o.name === "redownloads"));
 });
 
 test("missing services drop their commands", () => {
@@ -97,9 +99,31 @@ test("missing services drop their commands", () => {
   const usages = registry.help.map((h) => h.usage).sort();
   assert.deepEqual(usages, [
     "/help", "/pings", "/plezy", "/report", "/request movie", "/request series", "/requests",
-    "/setup channels", "/setup edit", "/setup links", "/setup pings", "/setup plezy", "/setup reset", "/setup show", "/setup stats", "/setup welcome",
-    "/stats", "/status", "/statusboard post", "/statusboard repost",
+    "/setup channels", "/setup edit", "/setup links", "/setup pings", "/setup plezy", "/setup reset", "/setup show", "/setup stats", "/setup statusboard", "/setup welcome",
+    "/stats", "/status",
   ]);
+});
+
+test("/help: short, grouped, plain-language; admin and inviter sections only for them", async () => {
+  const { registry } = setup({ subsonic: { url: `${mock.base}/aurral`, user: "bot", password: "pw", bitrate: 128, idleMinutes: 5 } });
+  const help = async (extra = {}) => {
+    const i = await slash(registry, "help", undefined, {}, extra);
+    return json(i.last().embeds[0]);
+  };
+  const member = await help();
+  const names = member.fields.map((f) => f.name);
+  assert.deepEqual(names, ["🎬 Get something new", "🛠️ Something wrong with a file?", "🎵 Music", "ℹ️ Good to know"]);
+  const text = JSON.stringify(member);
+  assert.match(text, /`\/request movie` · `series` · `album`/);
+  assert.doesNotMatch(text, /\/setup|\/admin|\/invite|Seerr|Radarr|Sonarr|Lidarr|Wizarr/);
+  assert.doesNotMatch(text, /`\/plex`/, "Plex linking isn't mentioned while it isn't required");
+  assert.ok(!member.fields.some((f) => f.name === "➕ More"), "everything is covered by the guide");
+
+  const admin = await help({ roles: ["admin-role"] });
+  const adminNames = admin.fields.map((f) => f.name);
+  assert.ok(adminNames.includes("🔒 Admin") && adminNames.includes("🎟️ Inviting people"));
+  assert.ok(!adminNames.includes("➕ More"));
+  assert.ok(JSON.stringify(admin).length < 3000, "fits on a phone screen or two");
 });
 
 test("/request movie: search → buttons → request attributed to mapped Seerr user", async () => {
@@ -558,16 +582,19 @@ test("stats board: placed once, edited only when a number changes", async () => 
   store.close();
 });
 
-test("aurral: signup creates the account and DMs the login once; taken names and links handled", async () => {
+test("aurral: /aurral creates the account and DMs the login once; taken names and links handled", async () => {
   mock.state.aurralUsers = [{ id: 1, username: "admin", role: "admin" }, { id: 2, username: "taken", role: "user" }];
   const { registry, client, store } = setup();
-  const run = async (sub, options, extra = {}) => {
-    const i = fakeInteraction({ options: { ...options, __sub: sub }, ...extra });
-    Object.assign(i, { commandName: "aurral", guildId: "g1", user: { id: extra.userId ?? "u1", username: extra.username ?? "Alex.B!" }, isChatInputCommand: () => true, isAutocomplete: () => false, isMessageComponent: () => false, isModalSubmit: () => false, isRepliable: () => true });
+  const run = async (path, options, extra = {}) => {
+    const [cmd, ...rest] = path.split(" ");
+    const sub = rest.at(-1);
+    const group = rest.length > 1 ? rest[0] : undefined;
+    const i = fakeInteraction({ options: { ...options, __sub: sub, __group: group }, ...extra });
+    Object.assign(i, { commandName: cmd, guildId: "g1", user: { id: extra.userId ?? "u1", username: extra.username ?? "Alex.B!" }, isChatInputCommand: () => true, isAutocomplete: () => false, isMessageComponent: () => false, isModalSubmit: () => false, isRepliable: () => true });
     await registry.handle(i);
     return i;
   };
-  const r1 = await run("signup", {});
+  const r1 = await run("aurral", {});
   const post = mock.calls.filter((x) => x.method === "POST" && x.path === "/aurral/api/users").at(-1);
   assert.equal(post.body.username, "alex.b");
   assert.equal(post.body.role, "user");
@@ -577,18 +604,18 @@ test("aurral: signup creates the account and DMs the login once; taken names and
   assert.match(desc, new RegExp(`\\|\\|\`${post.body.password}\`\\|\\|`));
   assert.equal(store.aurralAccount("u1").username, "alex.b");
 
-  const again = await run("signup", {});
-  assert.match(again.last().content, /already have an account/);
+  const again = await run("aurral", {});
+  assert.match(JSON.stringify(again.last().embeds[0].toJSON()), /Your Aurral account.*alex\.b/s, "running it again just shows your login");
   assert.doesNotMatch(JSON.stringify(again.last().embeds[0].toJSON()), new RegExp(post.body.password), "password never shown again");
 
-  const taken = await run("signup", { username: "taken" }, { userId: "u2", username: "sam" });
+  const taken = await run("aurral", { username: "taken" }, { userId: "u2", username: "sam" });
   assert.match(taken.last().content, /already an Aurral account called `taken`/);
 
-  const linked = await run("link", { user: { id: "u2" }, username: "taken" }, { roles: ["admin-role"], userId: "boss" });
+  const linked = await run("admin aurral link", { user: { id: "u2" }, username: "taken" }, { roles: ["admin-role"], userId: "boss" });
   assert.match(linked.last().content, /linked to the Aurral account `taken`/);
   assert.equal(store.aurralAccount("u2").username, "taken");
 
-  const denied = await run("create", { user: { id: "u3", username: "kim", bot: false } }, { roles: [], userId: "u4" });
+  const denied = await run("invite aurral", { user: { id: "u3", username: "kim", bot: false } }, { roles: [], userId: "u4" });
   assert.match(denied.last().content, /Inviter role/);
   store.close();
 });

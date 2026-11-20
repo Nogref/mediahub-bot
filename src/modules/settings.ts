@@ -10,7 +10,8 @@ import type { ModuleFactory, SubcommandDef } from "../core/module.js";
 import { OPT_CATEGORIES } from "../core/roles.js";
 import { setChannel, setLink, type ChannelKey, type LinkKey } from "../core/settings.js";
 
-export const SETUP = { parent: "setup", parentDescription: "Admin: set up the bot's posts, boards, channels and links", gate: "admin" } as const;
+import { SETUP } from "./parents.js";
+export { SETUP };
 
 const CHANNELS: Array<{ key: ChannelKey; option: string; label: string; help: string }> = [
   { key: "notify", option: "announcements", label: "Announcements", help: "New movies/shows/albums and 'your request is ready' pings" },

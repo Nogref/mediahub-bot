@@ -18,7 +18,7 @@ import type { ModuleFactory } from "../core/module.js";
 import { MediaStatus, posterUrl, type SeerrMediaInfo, type SeerrMediaType, type SeerrSearchResult } from "../services/seerr.js";
 
 const MAX_RESULTS = 5;
-const PARENT = { parent: "request", parentDescription: "Request movies, series or albums" } as const;
+const PARENT = { parent: "request", parentDescription: "Ask for a movie, TV show or album" } as const;
 
 interface StatusInfo {
   label: string;
@@ -177,14 +177,14 @@ export const mediaRequests: ModuleFactory = ({ services, store, cfg }) => {
       {
         ...PARENT,
         name: "movie",
-        description: "Request a movie (goes straight to Seerr → Radarr)",
+        description: "Ask for a movie. It downloads automatically",
         build: (b) => b.addStringOption((o) => o.setName("query").setDescription("Movie title, optionally with year").setRequired(true).setMaxLength(100)),
         execute: (i) => search(i, "movie"),
       },
       {
         ...PARENT,
         name: "series",
-        description: "Request a TV series (goes straight to Seerr → Sonarr)",
+        description: "Ask for a TV show. It downloads automatically",
         build: (b) => b.addStringOption((o) => o.setName("query").setDescription("Series title").setRequired(true).setMaxLength(100)),
         execute: (i) => search(i, "tv"),
       },

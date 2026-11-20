@@ -52,7 +52,8 @@ function setup(overrides = {}) {
 }
 
 function slash(registry, name, sub, options = {}, extra = {}) {
-  const i = fakeInteraction({ options: { ...options, __sub: sub }, ...extra });
+  const [group, leaf] = sub?.includes(" ") ? sub.split(" ") : [undefined, sub];
+  const i = fakeInteraction({ options: { ...options, __sub: leaf, __group: group }, ...extra });
   Object.assign(i, { commandName: name, guildId: "g1", isChatInputCommand: () => true, isAutocomplete: () => false, isMessageComponent: () => false, isRepliable: () => true });
   return registry.handle(i).then(() => i);
 }
@@ -132,10 +133,10 @@ test("import messages: only 'not an upgrade' blocks lead to a swap", () => {
 });
 
 // ---- plex linking ---------------------------------------------------------------------------
-test("/plex link: sign in, confirm the share list, never keep the token, one Discord per Plex account", async () => {
+test("/plex: sign in, confirm the share list, never keep the token, one Discord per Plex account", async () => {
   const env = setup();
   mock.state.pinToken = "alicetoken";
-  const i = await slash(env.registry, "plex", "link");
+  const i = await slash(env.registry, "plex");
   const first = i.log.find((l) => l.type === "edit").p;
   assert.match(first.components[0].toJSON().components[0].url, /^https:\/\/app\.plex\.tv\/auth#\?clientID=.+&code=PINCODE/);
   assert.match(text(i.last()), /Linked to alice/);
@@ -146,7 +147,7 @@ test("/plex link: sign in, confirm the share list, never keep the token, one Dis
   assert.ok(!dbDump.includes("alicetoken"), "the member's Plex token is never stored");
 
   // Someone else can't claim the same Plex account.
-  const j = await slash(env.registry, "plex", "link", {}, { userId: "u2" });
+  const j = await slash(env.registry, "plex", undefined, {}, { userId: "u2" });
   assert.match(text(j.last()), /already linked to another Discord member/);
   assert.equal(env.rstore.link("u2"), undefined);
 });
@@ -159,17 +160,17 @@ test("open to every member by default: no Plex link needed", async () => {
   assert.equal(job.plexUsername, undefined);
   const st = await slash(env.registry, "redownload", "status");
   assert.doesNotMatch(text(st.last()), /Plex account/, "no nagging about linking while it isn't required");
-  const ov = await slash(env.registry, "redownload", "overview", {}, ADMIN);
+  const ov = await slash(env.registry, "admin", "redownloads overview", {}, ADMIN);
   assert.match(text(ov.last()), /Open to every member of this server/);
 });
 
 test("gates (plex check on): must be linked, on the share list, not banned, not paused; recycling bin required", async () => {
   const env = setup();
-  let i = await slash(env.registry, "redownload", "plexcheck", { mode: "on" });
+  let i = await slash(env.registry, "admin", "redownloads plexcheck", { mode: "on" });
   assert.match(text(i.last()), /admins only/);
-  await slash(env.registry, "redownload", "plexcheck", { mode: "on" }, ADMIN);
+  await slash(env.registry, "admin", "redownloads plexcheck", { mode: "on" }, ADMIN);
   i = await slash(env.registry, "redownload", "start", { title: "m:1", problem: "video", details: "freezes at the bank scene" });
-  assert.match(text(i.last()), /link your Plex account with `\/plex link`/);
+  assert.match(text(i.last()), /link your Plex account with `\/plex`/);
 
   link(env.rstore, "u1", 43, false);
   i = await slash(env.registry, "redownload", "start", { title: "m:1", problem: "video", details: "freezes at the bank scene" });
@@ -184,18 +185,18 @@ test("gates (plex check on): must be linked, on the share list, not banned, not 
   assert.match(text(i.last()), /Settings → Media Management/, "admins get the fix");
   mock.state.bins.radarr = "/recycle";
 
-  await slash(env.registry, "redownload", "pause", { reason: "maintenance" }, ADMIN);
+  await slash(env.registry, "admin", "redownloads pause", { reason: "maintenance" }, ADMIN);
   i = await slash(env.registry, "redownload", "start", { title: "m:1", problem: "video", details: "freezes at the bank scene" });
   assert.match(text(i.last()), /paused by an admin: maintenance/);
-  await slash(env.registry, "redownload", "resume", {}, ADMIN);
+  await slash(env.registry, "admin", "redownloads resume", {}, ADMIN);
 
-  await slash(env.registry, "redownload", "ban", { user: { id: "u1" }, reason: "spam" }, ADMIN);
+  await slash(env.registry, "admin", "redownloads ban", { user: { id: "u1" }, reason: "spam" }, ADMIN);
   i = await slash(env.registry, "redownload", "start", { title: "m:1", problem: "video", details: "freezes at the bank scene" });
   assert.match(text(i.last()), /can't use redownloads right now \(spam\)/);
-  await slash(env.registry, "redownload", "unban", { user: { id: "u1" } }, ADMIN);
+  await slash(env.registry, "admin", "redownloads unban", { user: { id: "u1" } }, ADMIN);
 
   // Non-admins can't run admin subcommands.
-  i = await slash(env.registry, "redownload", "pause", {});
+  i = await slash(env.registry, "admin", "redownloads pause", {});
   assert.match(text(i.last()), /admins only/);
 });
 
@@ -416,7 +417,7 @@ test("locks: a running season blocks its episodes; global max; admins bypass lim
 test("approve-first: waits for an admin; deny refunds and tells them; approve starts it", async () => {
   const env = setup();
   link(env.rstore);
-  await slash(env.registry, "redownload", "approvals", { mode: "on" }, ADMIN);
+  await slash(env.registry, "admin", "redownloads approvals", { mode: "on" }, ADMIN);
   const { job, reply } = await startJob(env, { title: "m:1" });
   assert.equal(job.state, "awaiting_approval");
   assert.match(reply, /Sent to the admins/);
@@ -442,13 +443,14 @@ test("cancel before the swap removes the download (no blocklist) and refunds; ba
   const { job } = await startJob(env, { title: "m:1" });
   await until(env, job.id, "downloading");
   await env.engine.tick(job.id);
-  const c = await slash(env.registry, "redownload", "cancel", { job: job.id });
+  const other = await click(env.registry, `rdt:stop:${job.id}`, { userId: "u2" });
+  assert.match(text(other.last()), /isn't yours/);
+  await click(env.registry, `rdt:cancel:${job.id}`);
+  const c = await click(env.registry, `rdt:stop:${job.id}`);
   assert.match(text(c.last()), /Cancelled/);
   assert.ok(mock.calls.some((x) => x.method === "DELETE" && x.path.startsWith("/radarr/api/v3/queue/") && x.query.blocklist === "false"));
   assert.equal(env.rstore.job(job.id).state, "cancelled");
   assert.ok(!env.client.dms.some((d) => /stopped|cancel/i.test(text(d.payload))), "no extra DM when they cancelled it themselves");
-  const other = await slash(env.registry, "redownload", "cancel", { job: job.id }, { userId: "u2" });
-  assert.match(text(other.last()), /can't find a redownload/);
 
   await click(env.registry, `rdl:ban:u1`, ADMIN);
   const i = await slash(env.registry, "redownload", "start", { title: "m:1", problem: "video", details: "freezes at the bank scene" });

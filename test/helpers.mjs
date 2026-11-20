@@ -157,6 +157,7 @@ export function fakeInteraction({ options = {}, customId, userId = "u1", roles =
       getInteger: (n) => options[n] ?? null,
       getFocused: () => options.__focused ?? "",
       getSubcommand: () => options.__sub ?? null,
+      getSubcommandGroup: () => options.__group ?? null,
       getFocused: () => options.__focused ?? "",
     },
     async deferReply() { i.deferred = true; log.push({ type: "defer" }); },

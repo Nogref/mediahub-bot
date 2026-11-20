@@ -4,12 +4,12 @@
  * copy keeps playing until the new one has fully downloaded, and the swap goes
  * through the app's recycling bin. Every step is logged for admins.
  *
- * Members:  /redownload start · status · cancel
- * Admins:   /redownload pause · resume · ban · unban · approvals · plexcheck · history · overview
+ * Members:  /redownload start · status (cancel and refresh are buttons on their tracker)
+ * Admins:   /admin redownloads overview · history · pause · resume · ban · unban · approvals · plexcheck
  *
  * Needs Radarr/Sonarr API keys (and Lidarr for albums). Open to every member
- * of the Discord server by default; `/redownload plexcheck on` limits it to
- * members with a linked Plex account (/plex link) on the server's share list.
+ * of the Discord server by default; `/admin redownloads plexcheck` limits it to
+ * members with a linked Plex account (/plex) on the server's share list.
  */
 import {
   ActionRowBuilder,
@@ -37,6 +37,7 @@ import { ACTIVE_STATES, RedownloadStore, type Job } from "../redownload/store.js
 import { Library, resolveTarget, TargetError } from "../redownload/targets.js";
 import type { CurrentFile, Release, Target } from "../redownload/types.js";
 import { plexTvFor } from "../services/plextv.js";
+import { ADMIN } from "./parents.js";
 
 const REVERIFY_MS = 6 * 3_600_000;
 const REVERIFY_GRACE_MS = 7 * 86_400_000;
@@ -90,7 +91,7 @@ export const redownload: ModuleFactory = (ctx) => {
     if (!l) {
       return {
         ok: false,
-        reason: "🔗 First, link your Plex account with `/plex link`. It's a one-time sign-in so I know you're on the server.",
+        reason: "🔗 First, link your Plex account with `/plex`. It's a one-time sign-in so I know you're on the server.",
       };
     }
     if (Date.now() - l.verifiedAt > REVERIFY_MS) {
@@ -378,7 +379,7 @@ export const redownload: ModuleFactory = (ctx) => {
       }
       log.info(`redownload: ${i.user.id} banned ${arg}`);
       return void (await i.reply({
-        content: `🚫 <@${arg}> can no longer use redownloads${denied ? ` (and ${denied} waiting request${denied === 1 ? " was" : "s were"} denied)` : ""}. Anything already running keeps going; use its Cancel button to stop it. Undo with \`/redownload unban\`.`,
+        content: `🚫 <@${arg}> can no longer use redownloads${denied ? ` (and ${denied} waiting request${denied === 1 ? " was" : "s were"} denied)` : ""}. Anything already running keeps going; use its Cancel button to stop it. Undo with \`/admin redownloads unban\`.`,
         flags: MessageFlags.Ephemeral,
         allowedMentions: { parse: [] },
       }));
@@ -423,7 +424,7 @@ export const redownload: ModuleFactory = (ctx) => {
         : `**Redownloads left:** ${Math.max(0, lim.dailyLimit - used)} of ${lim.dailyLimit}${used && nextFreeAt ? ` · next one frees up ${ts(nextFreeAt)}` : ""}`,
     ];
     if (settings.requirePlex || link) {
-      lines.push(`**Plex account:** ${link ? `${link.plexUsername} ${link.hasAccess ? "✅" : "❌ not on the share list"}` : "not linked. Run `/plex link`"}`);
+      lines.push(`**Plex account:** ${link ? `${link.plexUsername} ${link.hasAccess ? "✅" : "❌ not on the share list"}` : "not linked. Run `/plex`"}`);
     }
     if (settings.paused) lines.push("⏸️ Redownloads are paused right now.");
     if (settings.banned[i.user.id]) lines.push("🚫 You can't start redownloads right now.");
@@ -433,27 +434,8 @@ export const redownload: ModuleFactory = (ctx) => {
     if (!mine.length) e.addFields({ name: "How it works", value: "If something on Plex is broken (glitchy video, bad audio, wrong file), run `/redownload start` and I'll swap in a fresh copy." });
     // The live cards first (the same ones as in their DMs), then the summary.
     const cards = active.slice(0, 3).map((j) => trackerEmbed(j));
-    const buttons = active.length === 1 ? trackerPayload(active[0]).components : [];
+    const buttons = active.slice(0, 3).flatMap((j) => trackerPayload(j).components);
     await i.reply({ embeds: [...cards, e], components: buttons, flags: MessageFlags.Ephemeral });
-  }
-
-  async function cancel(i: ChatInputCommandInteraction) {
-    const id = i.options.getInteger("job", true);
-    const job = rstore.job(id);
-    const admin = access.isAdmin(i);
-    if (!job || (job.discordUserId !== i.user.id && !admin)) return void (await i.reply({ content: `I can't find a redownload #${id} of yours.`, flags: MessageFlags.Ephemeral }));
-    if (!cancellable(job)) {
-      const why = ACTIVE_STATES.includes(job.state) ? "the new copy is already being swapped in" : "it's already finished";
-      return void (await i.reply({ content: `#${id} can't be cancelled now: ${why}.`, flags: MessageFlags.Ephemeral }));
-    }
-    await i.deferReply({ flags: MessageFlags.Ephemeral });
-    await i.editReply(await engine.cancel(job.id, i.user.id));
-  }
-
-  async function jobAutocomplete(i: AutocompleteInteraction) {
-    const admin = access.isAdmin(i);
-    const jobs = rstore.activeJobs().filter((j) => cancellable(j) && (admin || j.discordUserId === i.user.id));
-    await i.respond(jobs.slice(0, 25).map((j) => ({ name: truncate(`#${j.id} ${j.target.label} (${j.state.replace("_", " ")})`, 100), value: j.id })));
   }
 
   async function titleAutocomplete(i: AutocompleteInteraction) {
@@ -462,7 +444,7 @@ export const redownload: ModuleFactory = (ctx) => {
   }
 
   // ---- admin ------------------------------------------------------------------------------
-  const ADMIN = { gate: "admin" as const };
+  const ADMIN_SUB = { ...ADMIN, group: { name: "redownloads", description: "Members' redownloads: limits, bans, approvals, history" } };
   const update = (fn: (s: ReturnType<typeof loadSettings>) => void) => {
     const s = loadSettings(store);
     fn(s);
@@ -559,31 +541,21 @@ export const redownload: ModuleFactory = (ctx) => {
       },
       { ...PARENT, name: "status", description: "Your redownloads and how many you have left", execute: status },
       {
-        ...PARENT,
-        name: "cancel",
-        description: "Stop a redownload before anything is replaced",
-        build: (b) => b.addIntegerOption((o) => o.setName("job").setDescription("Which one").setRequired(true).setAutocomplete(true)),
-        execute: cancel,
-        autocomplete: jobAutocomplete,
-      },
-      {
-        ...PARENT,
-        ...ADMIN,
+        ...ADMIN_SUB,
         name: "pause",
-        description: "Admin: stop members starting redownloads",
+        description: "Stop members starting redownloads",
         build: (b) => b.addStringOption((o) => o.setName("reason").setDescription("Shown to members").setMaxLength(200)),
         execute: async (i) => {
           const reason = i.options.getString("reason") ?? undefined;
           update((s) => (s.paused = { by: i.user.id, reason, at: Date.now() }));
           log.info(`redownload: paused by ${i.user.id}${reason ? ` (${reason})` : ""}`);
-          await i.reply({ content: "⏸️ Paused. Members can't start new redownloads; ones already running will finish. `/redownload resume` to reopen.", flags: MessageFlags.Ephemeral });
+          await i.reply({ content: "⏸️ Paused. Members can't start new redownloads; ones already running will finish. `/admin redownloads resume` to reopen.", flags: MessageFlags.Ephemeral });
         },
       },
       {
-        ...PARENT,
-        ...ADMIN,
+        ...ADMIN_SUB,
         name: "resume",
-        description: "Admin: let members start redownloads again",
+        description: "Let members start redownloads again",
         execute: async (i) => {
           update((s) => delete s.paused);
           log.info(`redownload: resumed by ${i.user.id}`);
@@ -591,10 +563,9 @@ export const redownload: ModuleFactory = (ctx) => {
         },
       },
       {
-        ...PARENT,
-        ...ADMIN,
+        ...ADMIN_SUB,
         name: "ban",
-        description: "Admin: stop a member using redownloads",
+        description: "Stop a member using redownloads",
         build: (b) =>
           b
             .addUserOption((o) => o.setName("user").setDescription("Member").setRequired(true))
@@ -608,10 +579,9 @@ export const redownload: ModuleFactory = (ctx) => {
         },
       },
       {
-        ...PARENT,
-        ...ADMIN,
+        ...ADMIN_SUB,
         name: "unban",
-        description: "Admin: let a member use redownloads again",
+        description: "Let a member use redownloads again",
         build: (b) => b.addUserOption((o) => o.setName("user").setDescription("Member").setRequired(true)),
         execute: async (i) => {
           const u = i.options.getUser("user", true);
@@ -621,10 +591,9 @@ export const redownload: ModuleFactory = (ctx) => {
         },
       },
       {
-        ...PARENT,
-        ...ADMIN,
+        ...ADMIN_SUB,
         name: "approvals",
-        description: "Admin: require an admin to approve each redownload",
+        description: "Require an admin to approve each redownload",
         build: (b) =>
           b.addStringOption((o) =>
             o
@@ -644,15 +613,14 @@ export const redownload: ModuleFactory = (ctx) => {
         },
       },
       {
-        ...PARENT,
-        ...ADMIN,
+        ...ADMIN_SUB,
         name: "plexcheck",
-        description: "Admin: only allow members with a linked Plex account (/plex link)",
+        description: "Only allow members with a linked Plex account (/plex)",
         build: (b) =>
           b.addStringOption((o) =>
             o
               .setName("mode")
-              .setDescription("On: /plex link and a confirmed share are required. Off: any member of this server")
+              .setDescription("On: members must link Plex with /plex first. Off: any member of this server")
               .setRequired(true)
               .addChoices({ name: "On", value: "on" }, { name: "Off", value: "off" }),
           ),
@@ -666,21 +634,20 @@ export const redownload: ModuleFactory = (ctx) => {
           log.info(`redownload: plex check ${on ? "on" : "off"} (${i.user.id})`);
           await i.reply({
             content: on
-              ? `🔗 Plex check is **on**. Members need \`/plex link\` with an account on your share list before they can redownload (${rstore.links().filter((l) => l.hasAccess).length} confirmed so far).`
+              ? `🔗 Plex check is **on**. Members need to run \`/plex\` with an account on your share list before they can redownload (${rstore.links().filter((l) => l.hasAccess).length} confirmed so far).`
               : "▶️ Plex check is **off**. Any member of this server can redownload (limits still apply).",
             flags: MessageFlags.Ephemeral,
           });
         },
       },
       {
-        ...PARENT,
-        ...ADMIN,
+        ...ADMIN_SUB,
         name: "history",
-        description: "Admin: recent redownloads",
+        description: "Recent redownloads",
         build: (b) => b.addUserOption((o) => o.setName("user").setDescription("Only this member")),
         execute: history,
       },
-      { ...PARENT, ...ADMIN, name: "overview", description: "Admin: settings, safety checks and what's running", execute: overview },
+      { ...ADMIN_SUB, name: "overview", description: "Settings, safety checks and what's running", execute: overview },
     ],
     components: { rdc: onCard, rdl: onLog, rdt: onTracker },
     start: () => {

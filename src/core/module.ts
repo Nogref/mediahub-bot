@@ -57,6 +57,8 @@ export interface CommandDef extends CommandBase {
 export interface SubcommandDef extends CommandBase {
   parent: string;
   parentDescription: string;
+  /** Optional middle level, e.g. /admin redownloads pause. */
+  group?: { name: string; description: string };
   name: string;
   build?(b: SlashCommandSubcommandBuilder): void;
 }

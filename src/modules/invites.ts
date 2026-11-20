@@ -22,10 +22,11 @@ import {
 } from "discord.js";
 import { Colors, dm, truncate, ts } from "../core/discord.js";
 import { log } from "../core/logger.js";
+import { INVITE } from "./parents.js";
 import type { ModuleFactory } from "../core/module.js";
 import { inviteIsValid, wizarrDate, type WizarrInvitation } from "../services/wizarr.js";
 
-const PARENT = { parent: "invite", parentDescription: "Plex invites (Wizarr)", gate: "inviter" } as const;
+const PARENT = INVITE;
 
 interface Row {
   inv: WizarrInvitation;
@@ -226,7 +227,7 @@ export const invites: ModuleFactory = ({ services, store, cfg, client, access })
       {
         ...PARENT,
         name: "create",
-        description: "Create a Wizarr invite link (pick a user to DM it to them)",
+        description: "Make a Plex invite link (pick someone to DM it to them)",
         build: (b) =>
           b
             .addUserOption((o) => o.setName("user").setDescription("Send the link to this member by DM"))
@@ -242,11 +243,11 @@ export const invites: ModuleFactory = ({ services, store, cfg, client, access })
             ),
         execute: create,
       },
-      { ...PARENT, name: "list", description: "Show active invites (inviters see their own)", execute: list },
+      { ...PARENT, name: "list", description: "Plex invites that are still open (inviters see their own)", execute: list },
       {
         ...PARENT,
         name: "revoke",
-        description: "Delete an invite so its link stops working",
+        description: "Cancel a Plex invite so its link stops working",
         build: (b) => b.addStringOption((o) => o.setName("name").setDescription("Invite nickname or code").setRequired(true).setAutocomplete(true)),
         execute: revoke,
         autocomplete,

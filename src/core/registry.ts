@@ -4,6 +4,7 @@
  * happen here, once, for every handler.
  */
 import {
+  PermissionFlagsBits,
   REST,
   Routes,
   SlashCommandBuilder,
@@ -29,6 +30,19 @@ export interface HelpLine {
 }
 
 const gateOf = (h: Pick<CommandDef, "adminOnly" | "gate">): Gate | undefined => h.gate ?? (h.adminOnly ? "admin" : undefined);
+
+/**
+ * Admin-only commands are hidden from the slash menu for anyone without Manage
+ * Server. (Server Settings → Integrations → the bot can change who sees them;
+ * the admin check still runs either way.)
+ */
+function hideFromMembers(b: SlashCommandBuilder) {
+  b.setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
+}
+
+function handlerKey(i: { commandName: string; options: { getSubcommandGroup(required?: boolean): string | null; getSubcommand(required?: boolean): string | null } }) {
+  return [i.commandName, i.options.getSubcommandGroup(false), i.options.getSubcommand(false)].filter(Boolean).join(" ");
+}
 
 export interface RegistrationStatus {
   ok: boolean;
@@ -62,6 +76,7 @@ export class Registry {
         if (this.handlers.has(c.name)) throw new Error(`Duplicate command /${c.name} (module ${m.name})`);
         const b = new SlashCommandBuilder().setName(c.name).setDescription(c.description);
         c.build?.(b);
+        if (gateOf(c) === "admin") hideFromMembers(b);
         this.json.push(b.toJSON());
         this.handlers.set(c.name, c);
         this.help.push({ usage: `/${c.name}`, description: c.description, gate: gateOf(c) });
@@ -83,7 +98,14 @@ export class Registry {
     for (const [name, { description, subs }] of parents) {
       if (this.handlers.has(name)) throw new Error(`/${name} is both a command and a subcommand parent`);
       const b = new SlashCommandBuilder().setName(name).setDescription(description);
+      const groups = new Map<string, { description: string; subs: SubcommandDef[] }>();
       for (const s of subs) {
+        if (s.group) {
+          const g = groups.get(s.group.name) ?? { description: s.group.description, subs: [] };
+          g.subs.push(s);
+          groups.set(s.group.name, g);
+          continue;
+        }
         b.addSubcommand((sb) => {
           sb.setName(s.name).setDescription(s.description);
           s.build?.(sb);
@@ -92,6 +114,23 @@ export class Registry {
         this.handlers.set(`${name} ${s.name}`, s);
         this.help.push({ usage: `/${name} ${s.name}`, description: s.description, gate: gateOf(s) });
       }
+      for (const [gname, g] of groups) {
+        b.addSubcommandGroup((gb) => {
+          gb.setName(gname).setDescription(g.description);
+          for (const s of g.subs) {
+            gb.addSubcommand((sb) => {
+              sb.setName(s.name).setDescription(s.description);
+              s.build?.(sb);
+              return sb;
+            });
+            this.handlers.set(`${name} ${gname} ${s.name}`, s);
+            this.help.push({ usage: `/${name} ${gname} ${s.name}`, description: s.description, gate: gateOf(s) });
+          }
+          return gb;
+        });
+      }
+      // A command that's entirely admin-only isn't shown to members at all.
+      if (subs.every((s) => gateOf(s) === "admin")) hideFromMembers(b);
       this.json.push(b.toJSON());
     }
   }
@@ -120,15 +159,13 @@ export class Registry {
     if (i.guildId && i.guildId !== this.cfg.guildId) return;
     try {
       if (i.isChatInputCommand()) {
-        const sub = i.options.getSubcommand(false);
-        const h = this.handlers.get(sub ? `${i.commandName} ${sub}` : i.commandName);
+        const h = this.handlers.get(handlerKey(i));
         if (!h) return respond(i, "That command isn't available right now (its service may not be configured).");
         const denied = this.access.check(i, gateOf(h));
         if (denied) return respond(i, denied);
         await h.execute(i);
       } else if (i.isAutocomplete()) {
-        const sub = i.options.getSubcommand(false);
-        const h = this.handlers.get(sub ? `${i.commandName} ${sub}` : i.commandName);
+        const h = this.handlers.get(handlerKey(i));
         if (!h?.autocomplete) return void (await i.respond([]).catch(() => undefined));
         if (this.access.check(i, gateOf(h))) return void (await i.respond([]).catch(() => undefined));
         await h.autocomplete(i);

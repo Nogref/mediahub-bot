@@ -146,7 +146,7 @@ export const report: ModuleFactory = ({ services, store, cfg, client, notifier }
     commands: [
       {
         name: "report",
-        description: "Report a problem with something on Plex (bad audio, subtitles…)",
+        description: "Tell the admins about a problem with something on Plex",
         build: (b) =>
           b
             .addStringOption((o) => o.setName("title").setDescription("Movie or series (start typing)").setRequired(true).setAutocomplete(true))

@@ -10,7 +10,7 @@ import type { Target } from "./types.js";
 export interface PolicySettings {
   paused?: { by: string; reason?: string; at: number };
   approvals: boolean;
-  /** Only members with a linked Plex account on the share list (/plex link). Off by default. */
+  /** Only members with a linked Plex account on the share list (/plex). Off by default. */
   requirePlex: boolean;
   banned: Record<string, { by: string; reason?: string; at: number }>;
 }

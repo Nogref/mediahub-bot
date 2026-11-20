@@ -1,32 +1,149 @@
-/** /help → every command this member can use. */
+/**
+ * /help: a short, friendly guide grouped by what people want to do, showing
+ * only what this member can use. Admin and inviter sections appear only for
+ * them. Any command not listed here still shows up under "More", so nothing
+ * new is ever hidden by accident.
+ */
 import { EmbedBuilder, MessageFlags } from "discord.js";
-import { GATE_ICON } from "../core/access.js";
 import { Colors } from "../core/discord.js";
 import type { ModuleFactory } from "../core/module.js";
 import type { HelpLine } from "../core/registry.js";
+import { loadSettings } from "../redownload/policy.js";
 
-/** Help needs the finished command list, which exists only after every module is built. */
+interface Entry {
+  /** Commands this line is about; shown only if at least one exists. */
+  cmds: string[];
+  text: string;
+  /** Replaces the auto-formatted command list (e.g. "/setup …"). */
+  display?: string;
+  /** Also covers every command starting with these (so they don't land in "More"). */
+  covers?: string[];
+  /** Known, but not worth showing right now. */
+  hidden?: boolean;
+}
+
+interface Section {
+  title: string;
+  gate?: "admin" | "inviter";
+  entries: Entry[];
+}
+
+/** "/request movie", "/request series" → "`/request movie` · `series`". */
+function formatCmds(cmds: string[]): string {
+  let parent = "";
+  return cmds
+    .map((c) => {
+      const parts = c.split(" ");
+      const head = parts.slice(0, -1).join(" ");
+      if (parts.length > 1 && head === parent) return `\`${parts.at(-1)}\``;
+      parent = parts.length > 1 ? head : "";
+      return `\`${c}\``;
+    })
+    .join(" · ");
+}
+
 export function helpModule(getLines: () => HelpLine[]): ModuleFactory {
-  return ({ access }) => ({
-    name: "help",
-    commands: [
+  return ({ access, store }) => {
+    const sections = (): Section[] => [
       {
-        name: "help",
-        description: "List the bot's commands",
-        execute: async (i) => {
-          const lines = getLines()
-            .filter((l) => !access.check(i, l.gate))
-            .sort((a, b) => a.usage.localeCompare(b.usage))
-            .map((l) => `${l.gate ? `${GATE_ICON[l.gate]} ` : ""}\`${l.usage}\` — ${l.description.replace(/^Admin: /, "")}`);
-          const legend = [access.isAdmin(i) ? "🔒 admins only" : "", access.isInviter(i) ? "🎟️ inviters" : ""].filter(Boolean).join(" · ");
-          const embed = new EmbedBuilder()
-            .setColor(Colors.info)
-            .setTitle("🤖 Commands")
-            .setDescription(lines.join("\n"))
-            .setFooter({ text: legend || "Search results and replies are only visible to you." });
-          await i.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
-        },
+        title: "🎬 Get something new",
+        entries: [
+          { cmds: ["/request movie", "/request series", "/request album"], text: "Ask for it and it downloads automatically" },
+          { cmds: ["/requests"], text: "What you've asked for, and what's arrived" },
+          { cmds: ["/random movie"], text: "Can't decide? Get a pick from the library" },
+        ],
       },
-    ],
-  });
+      {
+        title: "🛠️ Something wrong with a file?",
+        entries: [
+          { cmds: ["/redownload start", "/redownload status"], text: "Swap a broken file for a fresh copy yourself, and check on it" },
+          { cmds: ["/report"], text: "Tell the admins about a problem" },
+        ],
+      },
+      {
+        title: "🎵 Music",
+        entries: [
+          {
+            cmds: ["/music play"],
+            text: "Play songs in a voice channel",
+            covers: ["/music "],
+            display: "`/music play` (also `radio` · `queue` · `skip` · `shuffle` · `stop`)",
+          },
+          { cmds: ["/aurral"], text: "Your own music account, to listen on your phone or computer" },
+        ],
+      },
+      {
+        title: "ℹ️ Good to know",
+        entries: [
+          { cmds: ["/status"], text: "Is everything working right now?" },
+          { cmds: ["/stats"], text: "How big the library is, and other fun numbers" },
+          { cmds: ["/plezy"], text: "The better Plex app, and how to get it" },
+          { cmds: ["/pings"], text: "Choose which announcements @-ping you" },
+          // Only worth mentioning when redownloads need it.
+          { cmds: ["/plex"], text: "Link your Plex account (needed for redownloads)", hidden: !loadSettings(store).requirePlex },
+        ],
+      },
+      {
+        title: "🎟️ Inviting people",
+        gate: "inviter",
+        entries: [
+          { cmds: ["/invite create", "/invite list", "/invite revoke"], text: "Make a Plex invite link (and DM it to someone), see open ones, cancel one" },
+          { cmds: ["/invite aurral"], text: "Make someone a music account" },
+        ],
+      },
+      {
+        title: "🔒 Admin",
+        gate: "admin",
+        entries: [
+          { cmds: ["/setup show"], display: "`/setup …`", covers: ["/setup "], text: "Channels, posts, boards and links. Start with `/setup show`" },
+          { cmds: ["/admin redownloads overview"], display: "`/admin redownloads …`", covers: ["/admin redownloads "], text: "Limits, pause, bans, approvals, history. Start with `overview`" },
+          { cmds: ["/admin plex linked"], display: "`/admin plex …`", covers: ["/admin plex "], text: "Who's linked their Plex account" },
+          { cmds: ["/admin aurral link"], display: "`/admin aurral link`", text: "Connect an existing music account to a member" },
+        ],
+      },
+    ];
+
+    return {
+      name: "help",
+      commands: [
+        {
+          name: "help",
+          description: "What this bot can do for you",
+          execute: async (i) => {
+            const all = getLines();
+            const usable = all.filter((l) => !access.check(i, l.gate));
+            const have = new Set(usable.map((l) => l.usage));
+            const covered = new Set<string>(["/help"]);
+            const coverPrefixes: string[] = [];
+
+            const embed = new EmbedBuilder().setColor(Colors.info).setTitle("🤖 What I can do");
+            for (const sec of sections()) {
+              if (sec.gate && access.check(i, sec.gate)) continue;
+              const lines: string[] = [];
+              for (const e of sec.entries) {
+                const present = e.cmds.filter((c) => have.has(c));
+                e.cmds.forEach((c) => covered.add(c));
+                if (e.covers) coverPrefixes.push(...e.covers);
+                if (!present.length || e.hidden) continue;
+                lines.push(`${e.display ?? formatCmds(present)}\n-# ${e.text}`);
+              }
+              if (lines.length) embed.addFields({ name: sec.title, value: lines.join("\n") });
+            }
+
+            // Anything not in the guide above still gets listed.
+            const extra = usable.filter((l) => !covered.has(l.usage) && !coverPrefixes.some((p) => l.usage.startsWith(p)));
+            if (extra.length) {
+              embed.addFields({ name: "➕ More", value: extra.map((l) => `\`${l.usage}\`\n-# ${l.description.replace(/^(Admin|Inviters): /, "")}`).join("\n").slice(0, 1024) });
+            }
+            embed.setFooter({
+              text: access.isAdmin(i)
+                ? "Only admins see /setup and /admin in the menu (Server Settings → Integrations changes who can)."
+                : "Replies are only visible to you, unless a command says otherwise.",
+            });
+            await i.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+          },
+        },
+      ],
+    };
+  };
 }

@@ -94,7 +94,7 @@ export const stats: ModuleFactory = (ctx) => {
     commands: [
       {
         name: "stats",
-        description: "Library and request numbers",
+        description: "How big the library is, and other fun numbers",
         execute: async (i) => {
           await i.deferReply({ flags: MessageFlags.Ephemeral });
           const embed = new EmbedBuilder().setColor(Colors.info).setTitle("📊 Server stats").addFields(await collectStats(ctx)).setTimestamp(new Date());

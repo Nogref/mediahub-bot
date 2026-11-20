@@ -1,20 +1,32 @@
 /**
- * /plex link · status · unlink: connect a member's Discord to their Plex
- * account. Linking signs them in once through plex.tv and confirms the
- * account is on our server's share list. Their Plex token is never stored.
+ * /plex: connect a member's Discord to their Plex account. Not linked yet →
+ * it starts the sign-in straight away. Linked → shows the account with
+ * Unlink / Link a different account buttons. Linking signs in once through
+ * plex.tv and checks the account is on the server's share list. Their Plex
+ * token is never stored.
  *
- * Admin: /plex linked lists who's linked; /plex remove @user unlinks someone.
+ * Admin: /admin plex linked · /admin plex unlink @user
  */
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags, type ChatInputCommandInteraction } from "discord.js";
+import {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  EmbedBuilder,
+  MessageFlags,
+  type ChatInputCommandInteraction,
+  type MessageComponentInteraction,
+} from "discord.js";
 import { Colors, truncate, ts } from "../core/discord.js";
 import { log } from "../core/logger.js";
 import type { ModuleFactory } from "../core/module.js";
 import { RedownloadStore } from "../redownload/store.js";
 import { plexTvFor } from "../services/plextv.js";
+import { ADMIN } from "./parents.js";
 
 const PIN_WAIT_MS = 10 * 60_000;
 const POLL_MS = 3000;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const GROUP = { name: "plex", description: "Who's linked their Plex account" };
 
 export const plexLink: ModuleFactory = (ctx) => {
   const { store } = ctx;
@@ -22,15 +34,18 @@ export const plexLink: ModuleFactory = (ctx) => {
   if (!maybe) return null;
   const plexTv = maybe;
   const rstore = new RedownloadStore(store);
-  const pending = new Map<string, number>(); // discord id → attempt number (a newer /plex link cancels the older one)
+  const pending = new Map<string, number>(); // discord id → attempt number (a newer sign-in cancels the older one)
 
-  async function link(i: ChatInputCommandInteraction) {
-    await i.deferReply({ flags: MessageFlags.Ephemeral });
+  /** Works from the /plex command and from its "Link" button. */
+  async function link(i: ChatInputCommandInteraction | MessageComponentInteraction) {
+    if (i.isChatInputCommand()) await i.deferReply({ flags: MessageFlags.Ephemeral });
+    else await i.deferUpdate();
     const attempt = (pending.get(i.user.id) ?? 0) + 1;
     pending.set(i.user.id, attempt);
     const pin = await plexTv.createPin();
     const url = plexTv.authUrl(pin.code);
     await i.editReply({
+      content: "",
       embeds: [
         new EmbedBuilder()
           .setColor(Colors.plex)
@@ -50,10 +65,10 @@ export const plexLink: ModuleFactory = (ctx) => {
       token = await plexTv.pinToken(pin.id).catch(() => undefined);
       if (token) break;
     }
-    if (pending.get(i.user.id) !== attempt) return; // superseded by a newer /plex link
+    if (pending.get(i.user.id) !== attempt) return; // superseded by a newer sign-in
     pending.delete(i.user.id);
     if (!token) {
-      await i.editReply({ content: "⌛ The sign-in link expired. Run `/plex link` again when you're ready.", embeds: [], components: [] });
+      await i.editReply({ content: "⌛ The sign-in link expired. Run `/plex` again when you're ready.", embeds: [], components: [] });
       return;
     }
 
@@ -82,63 +97,92 @@ export const plexLink: ModuleFactory = (ctx) => {
           .setTitle(access ? `✅ Linked to ${account.username}` : `🔗 Linked to ${account.username}, but…`)
           .setDescription(
             access
-              ? "Your Plex account is confirmed on our server. You can now use `/redownload` to replace broken files yourself."
-              : "That Plex account isn't on our server's share list, so features that need a confirmed account stay locked. If you were just invited, finish joining first, then run `/plex link` again.",
+              ? "Your Plex account is confirmed on our server. You're all set."
+              : "That Plex account isn't on our server's share list. If you were just invited, accept the invite first, then run `/plex` again.",
           ),
       ],
     });
   }
 
-  async function status(i: ChatInputCommandInteraction) {
-    const l = rstore.link(i.user.id);
-    await i.reply({
-      content: l
-        ? `🔗 Linked to Plex account **${l.plexUsername}** since ${ts(l.linkedAt, "d")}. Server access: ${l.hasAccess ? "✅ confirmed" : "❌ not on the share list"} (checked ${ts(l.verifiedAt)}).`
-        : "You haven't linked a Plex account yet. Run `/plex link`.",
-      flags: MessageFlags.Ephemeral,
-    });
+  function linkedCard(userId: string) {
+    const l = rstore.link(userId)!;
+    return {
+      content: "",
+      embeds: [
+        new EmbedBuilder()
+          .setColor(l.hasAccess ? Colors.ok : Colors.warn)
+          .setTitle(`🔗 Linked to ${l.plexUsername}`)
+          .setDescription(
+            `Linked ${ts(l.linkedAt, "d")}. ${l.hasAccess ? "✅ Confirmed on our server." : "❌ This account isn't on our server's share list."}` +
+              `\n-# Last checked ${ts(l.verifiedAt)}`,
+          ),
+      ],
+      components: [
+        new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder().setCustomId("plexl:relink").setLabel("Link a different account").setStyle(ButtonStyle.Secondary),
+          new ButtonBuilder().setCustomId("plexl:unlink").setLabel("Unlink").setStyle(ButtonStyle.Secondary),
+        ),
+      ],
+    };
   }
 
-  async function unlink(i: ChatInputCommandInteraction) {
-    rstore.deleteLink(i.user.id);
-    await i.reply({ content: "🔓 Your Plex account is no longer linked.", flags: MessageFlags.Ephemeral });
-  }
-
-  const PARENT = { parent: "plex", parentDescription: "Link your Plex account to Discord" } as const;
   return {
     name: "plex-link",
-    subcommands: [
-      { ...PARENT, name: "link", description: "Link your Plex account (one quick sign-in)", execute: link },
-      { ...PARENT, name: "status", description: "Which Plex account you're linked to", execute: status },
-      { ...PARENT, name: "unlink", description: "Unlink your Plex account", execute: unlink },
+    commands: [
       {
-        ...PARENT,
+        name: "plex",
+        description: "Link your Plex account to Discord (or see which one is linked)",
+        execute: async (i) => {
+          if (!rstore.link(i.user.id)) return link(i);
+          await i.reply({ ...linkedCard(i.user.id), flags: MessageFlags.Ephemeral });
+        },
+      },
+    ],
+    components: {
+      plexl: async (i) => {
+        const action = i.customId.split(":")[1];
+        if (action === "relink") return link(i);
+        if (action === "unlink") {
+          rstore.deleteLink(i.user.id);
+          log.info(`plex: ${i.user.id} unlinked their Plex account`);
+          await i.update({ content: "🔓 Unlinked. Run `/plex` anytime to link again.", embeds: [], components: [] });
+        }
+      },
+    },
+    subcommands: [
+      {
+        ...ADMIN,
+        group: GROUP,
         name: "linked",
-        gate: "admin",
-        description: "Admin: list members with a linked Plex account",
+        description: "List members with a linked Plex account",
         execute: async (i) => {
           const all = rstore.links();
           const lines = all.map((l) => `${l.hasAccess ? "✅" : "❌"} <@${l.discordUserId}> → **${l.plexUsername}** · checked ${ts(l.verifiedAt)}`);
           await i.reply({
-            embeds: [new EmbedBuilder().setColor(Colors.info).setTitle(`🔗 ${all.length} linked member${all.length === 1 ? "" : "s"}`).setDescription(truncate(lines.join("\n") || "Nobody yet.", 4000))],
+            embeds: [
+              new EmbedBuilder()
+                .setColor(Colors.info)
+                .setTitle(`🔗 ${all.length} linked member${all.length === 1 ? "" : "s"}`)
+                .setDescription(truncate(lines.join("\n") || "Nobody yet.", 4000)),
+            ],
             flags: MessageFlags.Ephemeral,
             allowedMentions: { parse: [] },
           });
         },
       },
       {
-        ...PARENT,
-        name: "remove",
-        gate: "admin",
-        description: "Admin: unlink someone's Plex account",
+        ...ADMIN,
+        group: GROUP,
+        name: "unlink",
+        description: "Unlink someone's Plex account",
         build: (b) => b.addUserOption((o) => o.setName("user").setDescription("Member to unlink").setRequired(true)),
         execute: async (i) => {
           const u = i.options.getUser("user", true);
           rstore.deleteLink(u.id);
+          log.info(`plex: ${i.user.id} unlinked ${u.id}'s Plex account`);
           await i.reply({ content: `🔓 Unlinked <@${u.id}>'s Plex account.`, flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
         },
       },
     ],
   };
 };
-

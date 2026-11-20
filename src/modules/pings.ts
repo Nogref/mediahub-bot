@@ -21,6 +21,7 @@ import { LiveMessage } from "../core/liveMessage.js";
 import { log } from "../core/logger.js";
 import type { ModuleFactory } from "../core/module.js";
 import { OPT_CATEGORIES, type OptCategory } from "../core/roles.js";
+import { SETUP } from "./parents.js";
 
 export const ROLE_PERMISSION_HELP =
   "I need the **Manage Roles** permission, and my role has to sit **above** the ping roles in Server Settings → Roles.";
@@ -124,7 +125,7 @@ export const pings: ModuleFactory = ({ roles, store, client }) => {
     subcommands: [
       {
         parent: "setup",
-        parentDescription: "Admin: set up the bot's posts, boards, channels and links",
+        parentDescription: SETUP.parentDescription,
         gate: "admin",
         name: "pings",
         description: "Post a standalone ping-settings panel (the welcome post has one built in)",

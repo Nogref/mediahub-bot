@@ -26,16 +26,18 @@ export const moduleFactories: ModuleFactory[] = [
   mediaRequests, // /request movie|series        → Seerr
   musicRequests, // /request album               → Lidarr / Aurral
   music, //         /music … + /setup nowplaying → Subsonic into a voice channel
-  aurralAccounts, // /aurral signup|create|link|account
   myRequests, //    /requests                    → your requests + live progress
   report, //        /report                      → Seerr issues, DM when fixed
-  plexLink, //      /plex link|status|unlink      → confirms members are on the Plex server
-  redownload, //    /redownload …                 → members replace broken files themselves
+  // Order matters for menus: /admin lists redownloads, then plex, then aurral;
+  // /invite lists create/list/revoke before aurral.
+  redownload, //    /redownload … + /admin redownloads … → members replace broken files themselves
+  plexLink, //      /plex · /admin plex …         → confirms members are on the Plex server
+  invites, //       /invite create|list|revoke   → Wizarr
+  aurralAccounts, // /aurral · /invite aurral · /admin aurral link
   webhooks, //      POST /webhook/:service       → batched announcements + @mentions
   requestTracker, // polls pending bot requests  → @mentions if a webhook was missed
-  statusBoard, //   live board, /statusboard, /status
+  statusBoard, //   live board, /setup statusboard, /status
   stats, //         /stats + /setup stats board
-  invites, //       /invite create|list|revoke   → Wizarr
   random, //        /random movie                → Plex
   posts, //         /setup welcome|plezy|edit|reset, /plezy
   pings, //         /pings, /setup pings, ping-settings buttons

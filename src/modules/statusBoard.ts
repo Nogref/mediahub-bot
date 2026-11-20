@@ -1,6 +1,6 @@
 /**
  * Live status board (one message, edited in place), up/down heads-ups,
- * /statusboard post|repost and the on-demand /status.
+ * /setup statusboard [fresh] and the on-demand /status.
  */
 import { EmbedBuilder, MessageFlags, type Message, type SendableChannels } from "discord.js";
 import { Colors, DiscordCodes, discordErrorCode, respond, ts } from "../core/discord.js";
@@ -8,6 +8,7 @@ import { ApiError } from "../core/http.js";
 import { log } from "../core/logger.js";
 import type { AppContext, ModuleFactory, SubcommandDef } from "../core/module.js";
 import { healthTargets } from "../services/index.js";
+import { SETUP } from "./parents.js";
 
 export interface CheckResult {
   key: string;
@@ -268,44 +269,37 @@ export const statusBoard: ModuleFactory = (ctx) => {
     }
   }
 
-  const subcommands: SubcommandDef[] = [
-        {
-          parent: "statusboard",
-          parentDescription: "Manage the live status board",
-          name: "post",
-          description: "Post the live status board (or link to it if it already exists)",
-          execute: async (i) => {
-            await i.deferReply({ flags: MessageFlags.Ephemeral });
-            const existing = board ?? (await ensureBoardIfStored());
-            if (existing) return void (await respond(i, `📡 The status board is already live: ${link(existing)}`));
-            const msg = await postBoard();
-            board = msg;
-            await respond(i, msg ? `📡 Posted the status board: ${link(msg)}` : statusChannelId() ? "⚠️ I couldn't post in the status channel. Check my permissions there." : "Set a status channel first: `/setup channels status:#channel`.");
-          },
-        },
-        {
-          parent: "statusboard",
-          parentDescription: "Manage the live status board",
-          name: "repost",
-          adminOnly: true,
-          description: "Admin: abandon the current board and post a fresh one",
-          execute: async (i) => {
-            await i.deferReply({ flags: MessageFlags.Ephemeral });
-            const old = board;
-            const msg = await postBoard();
-            if (!msg) return void (await respond(i, statusChannelId() ? "⚠️ I couldn't post in the status channel. Check my permissions there." : "Set a status channel first: `/setup channels status:#channel`."));
-            board = msg;
-            if (old) {
-              await old
-                .edit({ embeds: [new EmbedBuilder().setColor(Colors.muted).setTitle("📡 Status board moved").setDescription(`It now lives here: ${link(msg)}`)] })
-                .catch(() => undefined);
-            }
-            await respond(i, `📡 Fresh status board posted: ${link(msg)}`);
-          },
-        },
-      ];
+  const noChannel = () =>
+    statusChannelId() ? "⚠️ I couldn't post in the status channel. Check my permissions there." : "Set a status channel first: `/setup channels status:#channel`.";
 
-  /** Like ensureBoard, but never posts: used by /statusboard post to decide. */
+  const subcommands: SubcommandDef[] = [
+    {
+      ...SETUP,
+      name: "statusboard",
+      description: "Post the live status board (or link to it if it's already up)",
+      build: (b) => b.addBooleanOption((o) => o.setName("fresh").setDescription("Post a brand-new board; the old one points to it")),
+      execute: async (i) => {
+        await i.deferReply({ flags: MessageFlags.Ephemeral });
+        const fresh = i.options.getBoolean("fresh") ?? false;
+        if (!fresh) {
+          const existing = board ?? (await ensureBoardIfStored());
+          if (existing) return void (await respond(i, `📡 The status board is already live: ${link(existing)}\n-# Want a new one? Use \`fresh: True\`.`));
+        }
+        const old = board;
+        const msg = await postBoard();
+        if (!msg) return void (await respond(i, noChannel()));
+        board = msg;
+        if (old && old.id !== msg.id) {
+          await old
+            .edit({ embeds: [new EmbedBuilder().setColor(Colors.muted).setTitle("📡 Status board moved").setDescription(`It now lives here: ${link(msg)}`)] })
+            .catch(() => undefined);
+        }
+        await respond(i, `📡 ${old ? "Fresh status board" : "Status board"} posted: ${link(msg)}`);
+      },
+    },
+  ];
+
+  /** Like ensureBoard, but never posts: used by /setup statusboard to decide. */
   async function ensureBoardIfStored(): Promise<Message | undefined> {
     const stored = store.kvGet<{ channelId: string; messageId: string }>(BOARD_KEY);
     if (!stored || stored.channelId !== statusChannelId()) return undefined;
@@ -324,7 +318,7 @@ export const statusBoard: ModuleFactory = (ctx) => {
     commands: [
       {
         name: "status",
-        description: "Check every service right now (only you see the answer)",
+        description: "Is everything working? Check the server right now (only you see it)",
         execute: async (i) => {
           await i.deferReply({ flags: MessageFlags.Ephemeral });
           const results = await runChecks(ctx);
