@@ -91,10 +91,10 @@ export async function resolveTarget(adapters: Adapters, pick: string, season?: n
 
   if (m[1] === "m") {
     const a = adapters.radarr;
-    if (!a) throw new TargetError("Movie redownloads aren't set up (Radarr needs an API key).");
+    if (!a) throw new TargetError("Redownloads for movies aren't set up yet.");
     if (season !== undefined || episode !== undefined) throw new TargetError("Season and episode are only for series. Leave them empty for movies.");
     const mv = await a.api.call<Json>(`/movie/${id}`);
-    if (!mv.hasFile) throw new TargetError(`**${mv.title}** isn't downloaded yet, so there's nothing to replace. Request it instead.`);
+    if (!mv.hasFile) throw new TargetError(`**${mv.title}** isn't on Plex yet, so there's nothing to replace. Request it with \`/request\` instead.`);
     const label = `${mv.title}${mv.year ? ` (${mv.year})` : ""}`;
     return {
       kind: "movie",
@@ -110,7 +110,7 @@ export async function resolveTarget(adapters: Adapters, pick: string, season?: n
 
   if (m[1] === "s") {
     const a = adapters.sonarr;
-    if (!a) throw new TargetError("TV redownloads aren't set up (Sonarr needs an API key).");
+    if (!a) throw new TargetError("Redownloads for TV shows aren't set up yet.");
     if (season === undefined) throw new TargetError("Which season? Add the **season** option, plus **episode** for a single episode (leave episode empty to replace the whole season).");
     const [series, episodes] = await Promise.all([
       a.api.call<Json>(`/series/${id}`),
@@ -121,7 +121,7 @@ export async function resolveTarget(adapters: Adapters, pick: string, season?: n
     if (episode !== undefined) {
       const ep = episodes.find((e) => e.episodeNumber === episode);
       if (!ep) throw new TargetError(`**${series.title}** has no S${pad(season)}E${pad(episode)}.`);
-      if (!ep.hasFile) throw new TargetError(`**${series.title}** S${pad(season)}E${pad(episode)} isn't downloaded yet, so there's nothing to replace.`);
+      if (!ep.hasFile) throw new TargetError(`**${series.title}** S${pad(season)}E${pad(episode)} isn't on Plex yet, so there's nothing to replace.`);
       return {
         kind: "episode",
         app: "sonarr",
@@ -133,7 +133,7 @@ export async function resolveTarget(adapters: Adapters, pick: string, season?: n
         dedupeKeys: [keys.episode(series.title, season, episode), keys.season(series.title, season)],
       };
     }
-    if (!withFiles.length) throw new TargetError(`**${series.title}** ${sLabel} has nothing downloaded yet.`);
+    if (!withFiles.length) throw new TargetError(`**${series.title}** ${sLabel} isn't on Plex yet.`);
     return {
       kind: "season",
       app: "sonarr",
@@ -147,10 +147,10 @@ export async function resolveTarget(adapters: Adapters, pick: string, season?: n
   }
 
   const a = adapters.lidarr;
-  if (!a) throw new TargetError("Album redownloads aren't set up (Lidarr isn't configured).");
+  if (!a) throw new TargetError("Redownloads for music aren't set up yet.");
   if (season !== undefined || episode !== undefined) throw new TargetError("Season and episode are only for series. Leave them empty for albums.");
   const al = await a.api.call<Json>(`/album/${id}`);
-  if (!(al.statistics?.trackFileCount > 0)) throw new TargetError(`**${al.title}** isn't downloaded yet, so there's nothing to replace.`);
+  if (!(al.statistics?.trackFileCount > 0)) throw new TargetError(`**${al.title}** isn't on Plex yet, so there's nothing to replace.`);
   const artistName: string = al.artist?.artistName ?? (await a.api.call<Json>(`/artist/${al.artistId}`)).artistName;
   return {
     kind: "album",

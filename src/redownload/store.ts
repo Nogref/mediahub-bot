@@ -45,6 +45,12 @@ export interface Job {
   /** Grab history behind the old files, blocklisted once the replacement is in. */
   oldGrabs: Array<{ historyId: number; title: string; downloadId?: string; blocklist?: boolean }>;
   errorCount?: number;
+  /** The member's live tracker card in their DMs. */
+  trackerChannelId?: string;
+  trackerMessageId?: string;
+  /** From the download queue, for the tracker: estimated finish time and queued/downloading/warning. */
+  eta?: string;
+  queueStatus?: string;
   /** Old file ids actually removed during the swap. */
   deletedIds?: number[];
   progress?: number;

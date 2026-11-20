@@ -29,9 +29,10 @@ import type { BotModule, ModuleFactory } from "../core/module.js";
 import { TtlCache } from "../core/ttlCache.js";
 import { buildAdapters } from "../redownload/arr.js";
 import { RedownloadEngine } from "../redownload/engine.js";
-import { cancellable, PROBLEMS, STATE_TEXT } from "../redownload/log.js";
+import { cancellable, PROBLEMS } from "../redownload/log.js";
+import { friendlyQuality, friendlyRelease, friendlySize, Tracker, trackerEmbed, trackerPayload } from "../redownload/tracker.js";
 import { loadSettings, precheck, quotaUsed, saveSettings } from "../redownload/policy.js";
-import { disqualify, fmtSize, pickCandidates, releaseSummary } from "../redownload/select.js";
+import { disqualify, pickCandidates } from "../redownload/select.js";
 import { ACTIVE_STATES, RedownloadStore, type Job } from "../redownload/store.js";
 import { Library, resolveTarget, TargetError } from "../redownload/targets.js";
 import type { CurrentFile, Release, Target } from "../redownload/types.js";
@@ -73,7 +74,8 @@ export const redownload: ModuleFactory = (ctx) => {
   if (!adapters.radarr && !adapters.sonarr && !adapters.lidarr) return null;
 
   const rstore = new RedownloadStore(store);
-  const engine = new RedownloadEngine({ adapters, rstore, notifier, client, cfg });
+  const tracker = new Tracker(client, rstore);
+  const engine = new RedownloadEngine({ adapters, rstore, notifier, client, cfg, tracker });
   const library = new Library(adapters);
   const plexTv = plexTvFor(ctx);
   const sessions = new TtlCache<string, Session>(10 * 60_000);
@@ -174,17 +176,17 @@ export const redownload: ModuleFactory = (ctx) => {
       return void (await i.editReply(
         me.admin
           ? `🛑 ${a.name} has no **Recycling Bin** set, and redownloads won't delete anything without one. Set it in ${a.name} → Settings → Media Management → File Management (show advanced), then try again.`
-          : `Redownloads for this kind of title aren't fully set up yet (an admin needs to switch on ${a.name}'s recycling bin). Use \`/report\` for now.`,
+          : "Redownloads for this aren't fully set up yet, so an admin needs to finish that first. Use `/report` for now.",
       ));
     }
 
     const blocked = precheck(rstore, loadSettings(store), limits(), me, target);
     if (blocked) return void (await i.editReply(blocked));
 
-    await i.editReply(`🔎 Looking for a fresh copy of **${truncate(target.label, 80)}**…`);
+    await i.editReply(`🔎 Looking for a fresh copy of **${truncate(target.label, 80)}**… this can take up to a minute.`);
     const [oldFiles, releases] = await Promise.all([a.currentFiles(target), a.search(target)]);
     const oldGrabs = await a.currentGrabs(target, oldFiles);
-    if (!oldFiles.length) return void (await i.editReply(`**${target.label}** has no files on disk right now, so there's nothing to replace. If it's missing, request it again.`));
+    if (!oldFiles.length) return void (await i.editReply(`**${target.label}** isn't on Plex right now, so there's nothing to replace. If it's missing, request it again with \`/request\`.`));
 
     const opts = {
       kind: target.kind,
@@ -201,9 +203,8 @@ export const redownload: ModuleFactory = (ctx) => {
       const top = [...reasons.entries()].sort((x, y) => y[1] - x[1]).slice(0, 3).map(([why, n]) => `${n}× ${truncate(why, 80)}`);
       log.info(`redownload: no usable release for ${target.label} (${releases.length} found: ${top.join("; ")})`);
       return void (await i.editReply(
-        `😕 I couldn't find a usable replacement for **${target.label}** right now ` +
-          `(${releases.length ? `${releases.length} release${releases.length === 1 ? "" : "s"} found, none suitable` : "the indexers returned nothing"}). ` +
-          `Nothing was changed and it didn't use a redownload. Try again later, or use \`/report\` so an admin can look.` +
+        `😕 I couldn't find another copy of **${target.label}** that's safe to use right now. ` +
+          `Nothing was changed and it didn't count toward your daily limit. Try again in a day or two, or use \`/report\` so an admin can look.` +
           (me.admin && top.length ? `\n-# Admin: ${top.join(" · ")}` : ""),
       ));
     }
@@ -217,33 +218,33 @@ export const redownload: ModuleFactory = (ctx) => {
   function card(sid: string, s: Session) {
     const r = s.candidates[s.chosen];
     const oldSize = s.oldFiles.reduce((a, f) => a + f.size, 0);
-    const now =
-      s.oldFiles.length === 1 ? `${s.oldFiles[0].quality} · ${fmtSize(oldSize)}` : `${s.oldFiles.length} files · ${fmtSize(oldSize)} · ${[...new Set(s.oldFiles.map((f) => f.quality))].join(", ")}`;
+    const qualities = [...new Set(s.oldFiles.map((f) => friendlyQuality(f.quality)))].join(", ");
+    const now = s.oldFiles.length === 1 ? `${qualities} · ${friendlySize(oldSize)}` : `${s.oldFiles.length} files · ${qualities} · ${friendlySize(oldSize)}`;
     const settings = loadSettings(store);
     const { used } = quotaUsed(rstore, s.userId);
     const lim = limits();
     const cost = s.admin
       ? "Admin: no limits."
-      : `Uses **${s.target.weight}** of your ${lim.dailyLimit} redownloads for the next 24 hours (${used} used). It's refunded if nothing gets replaced.`;
+      : `This uses ${s.target.weight} of your ${lim.dailyLimit} redownloads for the next 24 hours (${used} used so far). You get it back if nothing ends up being replaced.`;
     const e = new EmbedBuilder()
       .setColor(Colors.info)
       .setTitle(truncate(`🔁 Replace ${s.target.label}?`, 256))
       .setDescription(
         `**Problem:** ${PROBLEMS[s.problem] ?? s.problem}\n> ${truncate(s.details, 300)}\n\n` +
-          `Your current copy keeps playing until the new one has fully downloaded. Then the old file goes to the recycling bin and the new one takes its place. ` +
-          `If a download fails, I'll try up to ${lim.maxAttempts - 1} other release${lim.maxAttempts - 1 === 1 ? "" : "s"}.` +
-          (settings.approvals && !s.admin ? "\n\n⏳ An admin will need to approve it first." : ""),
+          "**What happens next:** I download the new copy while your current one keeps working. When it's ready, I swap it in (the old one is kept as a backup). " +
+          "I'll keep you posted in your DMs the whole way." +
+          (settings.approvals && !s.admin ? "\n\n⏳ An admin will need to OK it first." : ""),
       )
       .addFields(
         { name: "On Plex now", value: now, inline: true },
-        { name: s.chosen === 0 ? "Replacement (best match)" : "Replacement (your pick)", value: truncate(`${releaseSummary(r)}\n\`${r.title}\``, 1024), inline: true },
+        { name: s.chosen === 0 ? "New copy (my pick)" : "New copy (your pick)", value: truncate(`${friendlyRelease(r)}\n-# ${r.title}`, 1024), inline: true },
       )
-      .setFooter({ text: cost.replace(/\*\*/g, "") });
+      .setFooter({ text: cost });
     if (s.target.posterUrl) e.setThumbnail(s.target.posterUrl);
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(`rdc:go:${sid}`).setLabel(settings.approvals && !s.admin ? "Ask for approval" : "Replace it").setEmoji("🔁").setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`rdc:go:${sid}`).setLabel(settings.approvals && !s.admin ? "Ask an admin" : "Replace it").setEmoji("🔁").setStyle(ButtonStyle.Success),
     );
-    if (s.candidates.length > 1) row.addComponents(new ButtonBuilder().setCustomId(`rdc:pick:${sid}`).setLabel("Pick a different release").setStyle(ButtonStyle.Secondary));
+    if (s.candidates.length > 1) row.addComponents(new ButtonBuilder().setCustomId(`rdc:pick:${sid}`).setLabel("Choose a different copy").setStyle(ButtonStyle.Secondary));
     row.addComponents(new ButtonBuilder().setCustomId(`rdc:x:${sid}`).setLabel("Never mind").setStyle(ButtonStyle.Secondary));
     return { content: "", embeds: [e], components: [row] };
   }
@@ -251,17 +252,18 @@ export const redownload: ModuleFactory = (ctx) => {
   function picker(sid: string, s: Session) {
     const menu = new StringSelectMenuBuilder()
       .setCustomId(`rdc:sel:${sid}`)
-      .setPlaceholder("Choose a release")
+      .setPlaceholder("Choose a copy")
       .addOptions(
         s.candidates.slice(0, 25).map((r, idx) => ({
-          label: truncate(`${idx === 0 ? "★ " : ""}${releaseSummary(r)}`, 100),
+          label: truncate(`${idx === 0 ? "★ " : ""}${friendlyRelease(r)}`, 100),
           description: truncate(r.title, 100),
           value: String(idx),
           default: idx === s.chosen,
         })),
       );
     return {
-      content: "Pick the release to download instead. ★ is the one I'd choose. Higher quality first; for torrents, more seeders means a faster, safer download.",
+      content:
+        'Pick which copy to download instead. ★ is the one I\'d choose.\n-# Best quality first. "May be slow" ones can take a long time to download. Not sure? Stick with ★.',
       embeds: [],
       components: [
         new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu),
@@ -315,16 +317,50 @@ export const redownload: ModuleFactory = (ctx) => {
     });
     log.info(`redownload #${job.id}: ${s.userId} (${s.plexUsername ?? "no plex"}) → ${s.target.label} [${s.problem}] ${truncate(s.details, 120)}`);
 
-    await i.update({
-      content: needsApproval
-        ? `📨 Sent to the admins for approval (redownload #${job.id}). I'll DM you once it's decided. Your current copy is untouched.`
-        : `✅ On it! Redownload #${job.id} has started. Your current copy keeps working until the new one is ready, and I'll DM you when it's done. Check on it with \`/redownload status\`.`,
-      embeds: [],
-      components: [],
-    });
+    // Acknowledge first (Discord wants an answer within 3 seconds), then send the tracker.
+    await i.deferUpdate();
+    const dmOk = await tracker.start(job);
+    const header =
+      (needsApproval ? "📨 Sent to the admins. " : "✅ On it! ") +
+      (dmOk
+        ? "I've sent this to your DMs too, where it keeps updating until it's done."
+        : "Your DMs are closed, so I can't send you updates there. Check `/redownload status` anytime, and I'll mention you in the announcements channel when it's done.");
+    await i.editReply({ ...trackerPayload(job), content: header });
+    tracker.attachReply(job.id, i, header);
     await engine.updateLog(job);
     if (!needsApproval) void engine.tick(job.id);
   }
+
+  // ---- the member's tracker card (Refresh / Cancel) ------------------------------------------
+  async function onTracker(i: MessageComponentInteraction) {
+    const [, action, arg] = i.customId.split(":");
+    const job = rstore.job(Number(arg));
+    if (!job || (job.discordUserId !== i.user.id && !access.isAdmin(i))) {
+      return void (await i.reply({ content: "That isn't yours.", flags: MessageFlags.Ephemeral }));
+    }
+    if (action === "cancel") {
+      if (!cancellable(job)) return void (await i.update(trackerPayload(job)));
+      return void (await i.update({
+        content: "Cancel this redownload? Nothing has been changed yet, and you'll get it back on your daily limit.",
+        embeds: [trackerEmbed(job)],
+        components: [
+          new ActionRowBuilder<ButtonBuilder>().addComponents(
+            new ButtonBuilder().setCustomId(`rdt:stop:${job.id}`).setLabel("Yes, cancel it").setStyle(ButtonStyle.Danger),
+            new ButtonBuilder().setCustomId(`rdt:back:${job.id}`).setLabel("Keep going").setStyle(ButtonStyle.Secondary),
+          ),
+        ],
+      }));
+    }
+    await i.deferUpdate();
+    if (action === "stop") {
+      const msg = await engine.cancel(job.id, i.user.id);
+      const after = rstore.job(job.id)!;
+      return void (await tracker.show(i, after, after.state === "cancelled" ? "" : msg));
+    }
+    if (action === "refresh" && Date.now() - job.updatedAt > 15_000) await engine.tick(job.id);
+    await tracker.show(i, rstore.job(job.id)!);
+  }
+
 
   // ---- log buttons (admins) -------------------------------------------------------------
   async function onLog(i: MessageComponentInteraction) {
@@ -392,11 +428,13 @@ export const redownload: ModuleFactory = (ctx) => {
     if (settings.paused) lines.push("⏸️ Redownloads are paused right now.");
     if (settings.banned[i.user.id]) lines.push("🚫 You can't start redownloads right now.");
     const e = new EmbedBuilder().setColor(Colors.info).setTitle("🔁 Your redownloads").setDescription(lines.join("\n"));
-    if (active.length) e.addFields({ name: "In progress", value: truncate(active.map((j) => `${jobLine(j)}\n${STATE_TEXT[j.state]}${j.progress !== undefined && j.state === "downloading" ? ` (${j.progress}%)` : ""}`).join("\n"), 1024) });
     const past = mine.filter((j) => !ACTIVE_STATES.includes(j.state)).slice(0, 6);
     if (past.length) e.addFields({ name: "Recent", value: truncate(past.map((j) => jobLine(j)).join("\n"), 1024) });
     if (!mine.length) e.addFields({ name: "How it works", value: "If something on Plex is broken (glitchy video, bad audio, wrong file), run `/redownload start` and I'll swap in a fresh copy." });
-    await i.reply({ embeds: [e], flags: MessageFlags.Ephemeral });
+    // The live cards first (the same ones as in their DMs), then the summary.
+    const cards = active.slice(0, 3).map((j) => trackerEmbed(j));
+    const buttons = active.length === 1 ? trackerPayload(active[0]).components : [];
+    await i.reply({ embeds: [...cards, e], components: buttons, flags: MessageFlags.Ephemeral });
   }
 
   async function cancel(i: ChatInputCommandInteraction) {
@@ -404,7 +442,10 @@ export const redownload: ModuleFactory = (ctx) => {
     const job = rstore.job(id);
     const admin = access.isAdmin(i);
     if (!job || (job.discordUserId !== i.user.id && !admin)) return void (await i.reply({ content: `I can't find a redownload #${id} of yours.`, flags: MessageFlags.Ephemeral }));
-    if (!cancellable(job)) return void (await i.reply({ content: `#${id} can't be cancelled now: ${STATE_TEXT[job.state].replace(/^\S+\s/, "").toLowerCase()}.`, flags: MessageFlags.Ephemeral }));
+    if (!cancellable(job)) {
+      const why = ACTIVE_STATES.includes(job.state) ? "the new copy is already being swapped in" : "it's already finished";
+      return void (await i.reply({ content: `#${id} can't be cancelled now: ${why}.`, flags: MessageFlags.Ephemeral }));
+    }
     await i.deferReply({ flags: MessageFlags.Ephemeral });
     await i.editReply(await engine.cancel(job.id, i.user.id));
   }
@@ -641,7 +682,7 @@ export const redownload: ModuleFactory = (ctx) => {
       },
       { ...PARENT, ...ADMIN, name: "overview", description: "Admin: settings, safety checks and what's running", execute: overview },
     ],
-    components: { rdc: onCard, rdl: onLog },
+    components: { rdc: onCard, rdl: onLog, rdt: onTracker },
     start: () => {
       engine.start();
       const pending = rstore.activeJobs().length;

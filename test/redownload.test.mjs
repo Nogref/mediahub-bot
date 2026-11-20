@@ -178,7 +178,7 @@ test("gates (plex check on): must be linked, on the share list, not banned, not 
   link(env.rstore, "u1");
   mock.state.bins.radarr = "";
   i = await slash(env.registry, "redownload", "start", { title: "m:1", problem: "video", details: "freezes at the bank scene" });
-  assert.match(text(i.last()), /recycling bin/);
+  assert.match(text(i.last()), /aren't fully set up yet/);
   assert.ok(!mock.calls.some((c) => c.path.endsWith("/release")), "never searched without a safety net");
   i = await slash(env.registry, "redownload", "start", { title: "m:1", problem: "video", details: "freezes at the bank scene" }, ADMIN);
   assert.match(text(i.last()), /Settings → Media Management/, "admins get the fix");
@@ -205,7 +205,7 @@ test("movie: grab → download (old copy kept) → swap via recycling bin → im
   link(env.rstore);
   const { job, card } = await startJob(env, { title: "m:1" });
   assert.match(text(card), /Heat\.1995\.1080p\.BluRay\.x264-GOOD/);
-  assert.match(text(card), /keeps playing/);
+  assert.match(text(card), /current one keeps working/);
   await until(env, job.id, "downloading");
   const grab = mock.calls.find((c) => c.method === "POST" && c.path === "/radarr/api/v3/release");
   assert.deepEqual(grab.body, { guid: "guid-Heat.1995.1080p.BluRay.x264-GOOD", indexerId: 3 });
@@ -231,7 +231,7 @@ test("movie: grab → download (old copy kept) → swap via recycling bin → im
   const done = env.rstore.job(job.id);
   assert.equal(done.state, "done");
   assert.ok(mock.calls.some((c) => c.method === "POST" && c.path === "/radarr/api/v3/history/failed/1"), "old release blocklisted");
-  assert.match(text(env.client.dms.at(-1).payload), /Heat \(1995\).* replaced/);
+  assert.match(text(env.client.dms.at(-1).payload), /Heat \(1995\).* fixed and ready to watch/);
 
   // One log entry, edited along the way, ending ✅.
   const logPosts = posts(env.client, "c-rdlog");
@@ -294,7 +294,7 @@ test("episode: failed downloads retry other releases, then give up with the orig
   assert.equal(j.state, "failed");
   assert.equal(j.changedFiles, false);
   assert.ok(!mock.calls.some((c) => c.path.includes("/episodefile")  && c.method === "DELETE"), "never deleted anything");
-  assert.match(text(env.client.dms.at(-1).payload), /original copy is untouched.*didn't use up/s);
+  assert.match(text(env.client.dms.at(-1).payload), /original is untouched.*didn't count/s);
   const st = await slash(env.registry, "redownload", "status");
   assert.match(text(st.last()), /2 of 2/, "refunded");
 });
@@ -419,14 +419,15 @@ test("approve-first: waits for an admin; deny refunds and tells them; approve st
   await slash(env.registry, "redownload", "approvals", { mode: "on" }, ADMIN);
   const { job, reply } = await startJob(env, { title: "m:1" });
   assert.equal(job.state, "awaiting_approval");
-  assert.match(reply, /Sent to the admins for approval/);
+  assert.match(reply, /Sent to the admins/);
+  assert.match(reply, /waiting for an admin to OK it/);
   assert.ok(!mock.calls.some((c) => c.method === "POST" && c.path.endsWith("/release")), "nothing grabbed yet");
   const logRow = posts(env.client, "c-rdlog")[0].payload.components[0].toJSON().components.map((b) => b.custom_id);
   assert.deepEqual(logRow, [`rdl:approve:${job.id}`, `rdl:deny:${job.id}`, "rdl:ban:u1"]);
 
   await click(env.registry, `rdl:deny:${job.id}`, ADMIN);
   assert.equal(env.rstore.job(job.id).state, "denied");
-  assert.match(text(env.client.dms.at(-1).payload), /wasn't approved.*didn't use up/s);
+  assert.match(text(env.client.dms.at(-1).payload), /wasn't approved.*didn't count/s);
 
   // Try again (a denied one doesn't count or set a cooldown) and approve this time.
   const second = await startJob(env, { title: "m:1" });
@@ -445,7 +446,7 @@ test("cancel before the swap removes the download (no blocklist) and refunds; ba
   assert.match(text(c.last()), /Cancelled/);
   assert.ok(mock.calls.some((x) => x.method === "DELETE" && x.path.startsWith("/radarr/api/v3/queue/") && x.query.blocklist === "false"));
   assert.equal(env.rstore.job(job.id).state, "cancelled");
-  assert.ok(!env.client.dms.length, "no DM when they cancelled it themselves");
+  assert.ok(!env.client.dms.some((d) => /stopped|cancel/i.test(text(d.payload))), "no extra DM when they cancelled it themselves");
   const other = await slash(env.registry, "redownload", "cancel", { job: job.id }, { userId: "u2" });
   assert.match(text(other.last()), /can't find a redownload/);
 
@@ -471,7 +472,7 @@ test("no usable release: nothing changes, nothing is used up", async () => {
   link(env.rstore);
   mock.state.releases.movie = mock.state.releases.movie.filter((r) => r.title.includes("OLD") || r.title.includes("REMUX"));
   const i = await slash(env.registry, "redownload", "start", { title: "m:1", problem: "video", details: "freezes at the bank scene" });
-  assert.match(text(i.last()), /couldn't find a usable replacement/);
+  assert.match(text(i.last()), /couldn't find another copy/);
   assert.equal(env.rstore.recentJobs().length, 0);
 });
 
@@ -484,4 +485,94 @@ test("autocomplete searches the library across apps; typed titles resolve when u
   link(env.rstore);
   const i = await slash(env.registry, "redownload", "start", { title: "the show", problem: "video", details: "freezes at the bank scene" });
   assert.match(text(i.last()), /Which season\?/);
+});
+
+// ---- the member's tracker ----------------------------------------------------------------------
+const JARGON = /radarr|sonarr|lidarr|torrent|seeder|indexer|usenet|recycl|queue|grab/i;
+const dmEdits = (env, job) => env.client.messages.get(env.rstore.job(job.id).trackerMessageId)?.edits ?? [];
+
+test("tracker: a DM card that follows the redownload in plain language, then a final ping", async () => {
+  const env = setup();
+  const { job, reply } = await startJob(env, { title: "m:1" });
+  assert.match(reply, /On it!.*sent this to your DMs/s);
+  const first = env.client.dms[0];
+  assert.match(text(first.payload), /Fixing Heat \(1995\)/);
+  assert.match(text(first.payload), /Your current copy keeps working/);
+  await until(env, job.id, "downloading");
+
+  // Partway through: a progress bar and an ETA.
+  const item = mock.state.queue[0];
+  item.sizeleft = item.size * 0.6;
+  item.estimatedCompletionTime = new Date(Date.now() + 20 * 60_000).toISOString();
+  await env.engine.tick(job.id);
+  let card = text(dmEdits(env, job).at(-1));
+  assert.match(card, /✅ Found a fresh copy · 1080p · 8\.4 GB/);
+  assert.match(card, /▶️ Downloading  ▰▰▰▰▱▱▱▱▱▱ 40% · done <t:\d+:R>/);
+  assert.match(card, /⬜ Ready to watch/);
+
+  // The same progress again doesn't re-edit the message.
+  const edits = dmEdits(env, job).length;
+  await env.engine.tick(job.id);
+  assert.equal(dmEdits(env, job).length, edits);
+
+  mock.finish("Heat.1995.1080p.BluRay.x264-GOOD", { messages: [NOT_UPGRADE] });
+  await env.engine.tick(job.id);
+  card = text(dmEdits(env, job).at(-1));
+  assert.match(card, /▶️ Swapping in the new copy/);
+  assert.match(card, /may disappear from Plex for a minute/);
+  await env.engine.tick(job.id);
+  card = text(dmEdits(env, job).at(-1));
+  assert.match(card, /Ready to watch: Heat \(1995\)/);
+  assert.equal(dmEdits(env, job).at(-1).components.length, 0, "no buttons once it's over");
+  assert.match(text(env.client.dms.at(-1).payload), /fixed and ready to watch/);
+
+  // Nothing members see mentions the apps or download jargon.
+  for (const p of [first.payload, ...dmEdits(env, job)]) assert.doesNotMatch(text(p), JARGON);
+});
+
+test("tracker: retries say so; Refresh and Cancel (with a confirm) work from the DM", async () => {
+  const env = setup();
+  const { job } = await startJob(env, { title: "m:1" });
+  await until(env, job.id, "downloading");
+  mock.failDownload("Heat.1995.1080p.BluRay.x264-GOOD");
+  await env.engine.tick(job.id);
+  assert.match(text(dmEdits(env, job).at(-1)), /didn't work out, so I'm trying another \(try 2\)/);
+
+  // Someone else can't press their buttons.
+  let c = await click(env.registry, `rdt:cancel:${job.id}`, { userId: "u2" });
+  assert.match(text(c.last()), /isn't yours/);
+
+  const j = env.rstore.job(job.id);
+  j.updatedAt = Date.now() - 60_000;
+  env.rstore.saveJob(j);
+  c = await click(env.registry, `rdt:refresh:${job.id}`);
+  assert.match(text(c.last()), /Fixing Heat/);
+
+  c = await click(env.registry, `rdt:cancel:${job.id}`);
+  assert.match(text(c.last()), /Cancel this redownload\?/);
+  assert.equal(env.rstore.job(job.id).state, "downloading", "asks before cancelling");
+  c = await click(env.registry, `rdt:stop:${job.id}`);
+  assert.equal(env.rstore.job(job.id).state, "cancelled");
+  assert.match(text(c.last()), /Cancelled: Heat \(1995\)/);
+});
+
+test("tracker: DMs closed → the reply says where to look, /redownload status shows the live card", async () => {
+  const env = setup();
+  env.client.closedDMs.add("u1");
+  const { job, reply } = await startJob(env, { title: "m:1" });
+  assert.match(reply, /DMs are closed.*\/redownload status/s);
+  assert.equal(env.rstore.job(job.id).trackerMessageId, undefined);
+  await until(env, job.id, "downloading");
+  const st = await slash(env.registry, "redownload", "status");
+  const out = st.last();
+  assert.match(text(out), /Fixing Heat \(1995\)/);
+  assert.match(text(out), /Redownloads left:\*\* 1 of 2/);
+  assert.deepEqual(out.components[0].toJSON().components.map((b) => b.custom_id), [`rdt:refresh:${job.id}`, `rdt:cancel:${job.id}`]);
+  assert.doesNotMatch(text(out), JARGON);
+
+  mock.finish("Heat.1995.1080p.BluRay.x264-GOOD", { messages: [NOT_UPGRADE] });
+  await env.engine.tick(job.id);
+  await env.engine.tick(job.id);
+  const mention = posts(env.client, "c-notify").find((p) => /<@u1>/.test(p.payload.content ?? ""));
+  assert.match(mention.payload.content, /fixed and ready to watch/);
 });

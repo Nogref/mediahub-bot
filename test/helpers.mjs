@@ -95,6 +95,7 @@ export function fakeClient() {
             throw e;
           }
           dms.push({ to: id, payload: p });
+          return makeMessage(`dm-${id}`, p);
         },
       }),
     },

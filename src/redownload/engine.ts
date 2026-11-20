@@ -21,6 +21,7 @@ import type { Notifier } from "../notify/notifier.js";
 import type { Adapters } from "./arr.js";
 import { normRelease } from "./arr.js";
 import { logButtons, logEmbed } from "./log.js";
+import { trackerEmbed, type Tracker } from "./tracker.js";
 import { isHarmlessMessage, isNotUpgradeMessage, pickCandidates, readyToSwap } from "./select.js";
 import type { Job, JobState, RedownloadStore } from "./store.js";
 import type { QueueItem } from "./types.js";
@@ -37,6 +38,7 @@ export interface EngineDeps {
   notifier: Notifier;
   client: Client;
   cfg: Config;
+  tracker?: Tracker;
 }
 
 export class RedownloadEngine {
@@ -264,11 +266,14 @@ export class RedownloadEngine {
     // Still downloading: refresh the log entry every ~10 minutes.
     const pct = item.size > 0 ? Math.round(((item.size - item.sizeLeft) / item.size) * 100) : undefined;
     job.progress = pct;
+    job.eta = item.eta;
+    job.queueStatus = (item.trackedStatus ?? "").toLowerCase() === "warning" ? "warning" : item.status;
     if (!job.progressLoggedAt || Date.now() - job.progressLoggedAt > 10 * MINUTE) {
       job.progressLoggedAt = Date.now();
       await this.updateLog(job);
     }
     this.save(job);
+    await this.updateTracker(job); // only edits when the member would see a difference
   }
 
   // ---- the swap -------------------------------------------------------------------
@@ -447,6 +452,11 @@ export class RedownloadEngine {
     this.save(job, state);
     log.info(`redownload #${job.id} (${job.target.label}): ${text.replace(/<@\d+>/g, "")}`);
     await this.updateLog(job);
+    await this.updateTracker(job);
+  }
+
+  private async updateTracker(job: Job) {
+    await this.d.tracker?.update(job).catch((err) => log.debug(`redownload #${job.id}: tracker: ${(err as Error).message}`));
   }
 
   private logChannelId(): string | undefined {
@@ -492,22 +502,31 @@ export class RedownloadEngine {
     }
   }
 
+  /**
+   * A fresh message when it ends, so their phone actually buzzes (edits don't
+   * notify). If they have the tracker card, a one-liner; otherwise the card.
+   */
   private async notifyRequester(job: Job) {
-    const text: Record<string, string> = {
-      done: `✅ **${job.target.label}** has been replaced with a fresh copy. Give Plex a minute to notice, then try it again.`,
-      failed: `❌ I couldn't find a working replacement for **${job.target.label}**${job.outcome ? ` (${job.outcome})` : ""}. Your original copy is untouched, and this didn't use up one of your redownloads. If it's still broken, use \`/report\` so an admin can take a look.`,
-      cancelled: `🛑 Your redownload of **${job.target.label}** was cancelled before anything changed. It didn't use up one of your redownloads.`,
-      denied: `🚫 Your redownload of **${job.target.label}** wasn't approved${job.outcome ? ` (${job.outcome})` : ""}. It didn't use up one of your redownloads.`,
-    };
+    if (job.endedBy === job.discordUserId) return; // they cancelled it themselves
+    const label = `**${job.target.label}**`;
     const handFixed = job.state === "done" && /^Marked resolved/.test(job.outcome ?? "");
-    const msg = handFixed ? `🧰 An admin finished up your redownload of **${job.target.label}**. If it's still not right, use \`/report\`.` : text[job.state];
-    if (!msg || job.endedBy === job.discordUserId) return;
-    const sent = await dm(this.d.client, job.discordUserId, msg);
+    const short: Record<string, string> = {
+      done: handFixed ? `🧰 An admin finished up ${label}. If it's still not right, use \`/report\`.` : `✅ ${label} is fixed and ready to watch!`,
+      failed: `😕 I couldn't fix ${label}, sorry. Your original is untouched and it didn't count toward your daily limit.`,
+      cancelled: `🛑 An admin stopped your redownload of ${label} before anything changed. It didn't count toward your daily limit.`,
+      denied: `🚫 Your redownload of ${label} wasn't approved. It didn't count toward your daily limit.`,
+    };
+    const line = short[job.state];
+    if (!line) return;
+    const sent = await dm(this.d.client, job.discordUserId, job.trackerMessageId ? line : { embeds: [trackerEmbed(job)] });
     if (!sent && this.d.cfg.channels.notify) {
       const ch = await this.d.client.channels.fetch(this.d.cfg.channels.notify).catch(() => null);
       if (ch?.isSendable()) {
-        const short = job.state === "done" ? `✅ <@${job.discordUserId}> **${job.target.label}** has been replaced.` : `<@${job.discordUserId}> your redownload of **${job.target.label}** ended: ${job.state}.`;
-        await (ch as SendableChannels).send({ content: short, allowedMentions: { users: [job.discordUserId] } }).catch(() => undefined);
+        const text =
+          job.state === "done"
+            ? `<@${job.discordUserId}> ${line.replace(/^✅ /, "✅ ")}`
+            : `<@${job.discordUserId}> your redownload of ${label} couldn't be finished. Your original is untouched. \`/redownload status\` has the details.`;
+        await (ch as SendableChannels).send({ content: text, allowedMentions: { users: [job.discordUserId] } }).catch(() => undefined);
       }
     }
   }
