@@ -76,7 +76,7 @@ test("command set: everything registers, gates set, admin-only commands hidden f
     "/music play", "/music queue", "/music radio", "/music shuffle", "/music skip", "/music stop",
     "/pings", "/plex", "/plezy", "/random movie", "/redownload start", "/redownload status", "/report",
     "/request album", "/request movie", "/request series", "/requests",
-    "/setup channels", "/setup edit", "/setup links", "/setup nowplaying", "/setup pings", "/setup plezy", "/setup reset", "/setup show",
+    "/setup channels", "/setup commands-only", "/setup edit", "/setup help", "/setup links", "/setup nowplaying", "/setup pings", "/setup plezy", "/setup reset", "/setup show",
     "/setup stats", "/setup statusboard", "/setup welcome",
     "/stats", "/status", "/suggest",
   ].sort());
@@ -101,7 +101,7 @@ test("missing services drop their commands", () => {
   assert.deepEqual(usages, [
     "/admin suggestions review", "/admin suggestions top",
     "/help", "/pings", "/plezy", "/report", "/request movie", "/request series", "/requests",
-    "/setup channels", "/setup edit", "/setup links", "/setup pings", "/setup plezy", "/setup reset", "/setup show", "/setup stats", "/setup statusboard", "/setup welcome",
+    "/setup channels", "/setup commands-only", "/setup edit", "/setup help", "/setup links", "/setup pings", "/setup plezy", "/setup reset", "/setup show", "/setup stats", "/setup statusboard", "/setup welcome",
     "/stats", "/status", "/suggest",
   ]);
 });

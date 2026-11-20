@@ -5,7 +5,7 @@
 
 /** bot + applications.commands with View Channels, Send Messages, Embed Links, Attach Files,
  *  Read Message History, Manage Roles, Connect and Speak. */
-export const INVITE_PERMISSIONS = "271698944";
+export const INVITE_PERMISSIONS = "271707136"; // …plus Manage Messages (commands-only channels)
 
 export function inviteUrl(applicationId: string): string {
   return `https://discord.com/oauth2/authorize?client_id=${applicationId}&scope=bot%20applications.commands&permissions=${INVITE_PERMISSIONS}`;

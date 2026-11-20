@@ -27,9 +27,10 @@ async function main() {
 
   const store = new Store(cfg.dataDir);
   const services = buildServices(cfg);
-  // Slash commands only: no Message Content or privileged member intents. Voice
-  // states are only requested when music streaming is configured.
-  const intents = [GatewayIntentBits.Guilds, ...(cfg.subsonic ? [GatewayIntentBits.GuildVoiceStates] : [])];
+  // No privileged intents. Guild messages are only so commands-only channels can
+  // remove non-command messages (the bot never reads their text). Voice states
+  // are only requested when music streaming is configured.
+  const intents = [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, ...(cfg.subsonic ? [GatewayIntentBits.GuildVoiceStates] : [])];
   const client = new Client({ intents });
   applyStoredSettings(cfg, store); // channels/links set from Discord win over env
   const roles = new RoleDirectory(store, cfg);

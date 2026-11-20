@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 // Shared fakes for tests: config, Discord client/channel, and interaction objects.
 import fs from "node:fs";
 import os from "node:os";
@@ -77,11 +78,14 @@ export function fakeClient() {
   });
   const dms = [];
   const closedDMs = new Set();
+  const events = new EventEmitter();
   return {
     sent,
     messages,
     dms,
     closedDMs,
+    on: (ev, fn) => events.on(ev, fn),
+    emit: (ev, ...args) => events.emit(ev, ...args),
     isReady: () => true,
     channels: { fetch: async (id) => channel(id) },
     guilds: { cache: new Map([["g1", { id: "g1", name: "Test Server" }]]) },

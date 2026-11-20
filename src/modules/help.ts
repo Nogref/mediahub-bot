@@ -3,12 +3,19 @@
  * only what this member can use. Admin and inviter sections appear only for
  * them. Any command not listed here still shows up under "More", so nothing
  * new is ever hidden by accident.
+ *
+ * /setup help channel:#commands posts the same guide (the everyone view) as a
+ * message that stays, like the welcome post, and updates itself whenever the
+ * bot's commands change.
  */
-import { EmbedBuilder, MessageFlags } from "discord.js";
-import { Colors } from "../core/discord.js";
+import { ChannelType, EmbedBuilder, MessageFlags } from "discord.js";
+import { Colors, respond } from "../core/discord.js";
+import { LiveMessage } from "../core/liveMessage.js";
+import { log } from "../core/logger.js";
 import type { ModuleFactory } from "../core/module.js";
 import type { HelpLine } from "../core/registry.js";
 import { loadSettings } from "../redownload/policy.js";
+import { SETUP } from "./parents.js";
 
 interface Entry {
   /** Commands this line is about; shown only if at least one exists. */
@@ -43,7 +50,8 @@ function formatCmds(cmds: string[]): string {
 }
 
 export function helpModule(getLines: () => HelpLine[]): ModuleFactory {
-  return ({ access, store }) => {
+  return ({ access, store, client, cfg, bus }) => {
+    const board = new LiveMessage(client, store, "help");
     const sections = (): Section[] => [
       {
         title: "🎬 Get something new",
@@ -105,6 +113,49 @@ export function helpModule(getLines: () => HelpLine[]): ModuleFactory {
       },
     ];
 
+    /** The guide for someone who can use `usable`; `canSee` decides the inviter/admin sections. */
+    function render(usable: HelpLine[], canSee: (gate: "admin" | "inviter") => boolean): EmbedBuilder {
+      const have = new Set(usable.map((l) => l.usage));
+      const covered = new Set<string>(["/help"]);
+      const coverPrefixes: string[] = [];
+      const embed = new EmbedBuilder().setColor(Colors.info).setTitle("🤖 What I can do");
+      for (const sec of sections()) {
+        if (sec.gate && !canSee(sec.gate)) continue;
+        const lines: string[] = [];
+        for (const e of sec.entries) {
+          const present = e.cmds.filter((c) => have.has(c));
+          e.cmds.forEach((c) => covered.add(c));
+          if (e.covers) coverPrefixes.push(...e.covers);
+          if (!present.length || e.hidden) continue;
+          lines.push(`${e.display ?? formatCmds(present)}\n-# ${e.text}`);
+        }
+        if (lines.length) embed.addFields({ name: sec.title, value: lines.join("\n") });
+      }
+      // Anything not in the guide above still gets listed.
+      const extra = usable.filter((l) => !covered.has(l.usage) && !coverPrefixes.some((p) => l.usage.startsWith(p)));
+      if (extra.length) {
+        embed.addFields({ name: "➕ More", value: extra.map((l) => `\`${l.usage}\`\n-# ${l.description.replace(/^(Admin|Inviters): /, "")}`).join("\n").slice(0, 1024) });
+      }
+      return embed;
+    }
+
+    /** The posted guide: what every member can use, nothing gated. */
+    function boardPayload() {
+      const embed = render(
+        getLines().filter((l) => !l.gate),
+        () => false,
+      )
+        .setTitle("📖 Commands")
+        .setDescription("Type **/** in this channel and pick one. Most replies are only visible to you, so ask away.")
+        .setFooter({ text: "This updates by itself whenever new commands are added. /help shows it anytime." });
+      return { embeds: [embed] };
+    }
+
+    async function refreshBoard() {
+      await board.update(boardPayload()).catch((err) => log.warn(`help: couldn't refresh the commands guide: ${(err as Error).message}`));
+    }
+    bus.on("help-changed", () => void refreshBoard());
+
     return {
       name: "help",
       commands: [
@@ -112,32 +163,8 @@ export function helpModule(getLines: () => HelpLine[]): ModuleFactory {
           name: "help",
           description: "What this bot can do for you",
           execute: async (i) => {
-            const all = getLines();
-            const usable = all.filter((l) => !access.check(i, l.gate));
-            const have = new Set(usable.map((l) => l.usage));
-            const covered = new Set<string>(["/help"]);
-            const coverPrefixes: string[] = [];
-
-            const embed = new EmbedBuilder().setColor(Colors.info).setTitle("🤖 What I can do");
-            for (const sec of sections()) {
-              if (sec.gate && access.check(i, sec.gate)) continue;
-              const lines: string[] = [];
-              for (const e of sec.entries) {
-                const present = e.cmds.filter((c) => have.has(c));
-                e.cmds.forEach((c) => covered.add(c));
-                if (e.covers) coverPrefixes.push(...e.covers);
-                if (!present.length || e.hidden) continue;
-                lines.push(`${e.display ?? formatCmds(present)}\n-# ${e.text}`);
-              }
-              if (lines.length) embed.addFields({ name: sec.title, value: lines.join("\n") });
-            }
-
-            // Anything not in the guide above still gets listed.
-            const extra = usable.filter((l) => !covered.has(l.usage) && !coverPrefixes.some((p) => l.usage.startsWith(p)));
-            if (extra.length) {
-              embed.addFields({ name: "➕ More", value: extra.map((l) => `\`${l.usage}\`\n-# ${l.description.replace(/^(Admin|Inviters): /, "")}`).join("\n").slice(0, 1024) });
-            }
-            embed.setFooter({
+            const usable = getLines().filter((l) => !access.check(i, l.gate));
+            const embed = render(usable, (gate) => !access.check(i, gate)).setFooter({
               text: access.isAdmin(i)
                 ? "Only admins see /setup and /admin in the menu (Server Settings → Integrations changes who can)."
                 : "Replies are only visible to you, unless a command says otherwise.",
@@ -146,6 +173,35 @@ export function helpModule(getLines: () => HelpLine[]): ModuleFactory {
           },
         },
       ],
+      subcommands: [
+        {
+          ...SETUP,
+          name: "help",
+          description: "Post the commands guide in a channel (it stays and updates itself)",
+          build: (b) =>
+            b
+              .addChannelOption((o) => o.setName("channel").setDescription("Where to post it (e.g. #commands)").addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement))
+              .addBooleanOption((o) => o.setName("remove").setDescription("Take the guide down instead")),
+          execute: async (i) => {
+            await i.deferReply({ flags: MessageFlags.Ephemeral });
+            if (i.options.getBoolean("remove")) {
+              const had = await board.remove();
+              return void (await respond(i, had ? "🗑️ Commands guide taken down." : "There's no commands guide posted."));
+            }
+            const channel = i.options.getChannel("channel");
+            if (!channel) {
+              const link = board.link(cfg.guildId);
+              return void (await respond(i, link ? `📖 The commands guide is here: ${link}. Pick a channel to move it.` : "Pick a channel to post the commands guide in."));
+            }
+            const msg = await board.place(channel.id, boardPayload());
+            await respond(i, `📖 Commands guide posted in <#${msg.channelId}>. It updates itself when commands change.\nTip: pin it, and use \`/setup commands-only\` on that channel so it stays tidy.`);
+          },
+        },
+      ],
+      // A new version may have new commands: bring the posted guide up to date.
+      start: () => {
+        if (board.location) void refreshBoard();
+      },
     };
   };
 }

@@ -631,6 +631,7 @@ export const redownload: ModuleFactory = (ctx) => {
             return;
           }
           update((s) => (s.requirePlex = on));
+          ctx.bus.emit("help-changed"); // /plex shows up in the guide only while it's needed
           log.info(`redownload: plex check ${on ? "on" : "off"} (${i.user.id})`);
           await i.reply({
             content: on

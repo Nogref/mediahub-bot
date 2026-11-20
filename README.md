@@ -31,6 +31,8 @@ Two rules shape the design:
 | `/invite aurral user:@x` | 🎟️ inviter | Makes an Aurral account for someone and DMs them the login |
 | `/setup welcome` · `plezy` · `stats` · `nowplaying` · `pings` · `statusboard` | 🔒 admin | Posts (or moves) the welcome post, Plezy guide, stats board, now-playing board, ping panel or status board (`statusboard fresh:True` posts a new one) |
 | `/setup edit post:…` · `/setup reset post:…` | 🔒 admin | Edit the welcome post or Plezy guide in a form; or restore the built-in text |
+| `/setup help channel:#x` · `remove:True` | 🔒 admin | Posts the commands guide (what every member can use) as a message that stays, like the welcome post, and updates itself when commands change |
+| `/setup commands-only channel:#x mode:on/off` | 🔒 admin | Members can use / commands in that channel, but anything else they type is removed (with a DM saying why) |
 | `/setup channels` · `/setup links` · `/setup show` | 🔒 admin | Set channels and public links from Discord; show the current setup |
 | `/admin redownloads overview` · `history [user]` | 🔒 admin | Settings, safety checks (recycling bins), what's running; recent redownloads |
 | `/admin redownloads pause` · `resume` · `ban` · `unban` · `approvals` · `plexcheck` | 🔒 admin | Stop everyone or one member, require an admin to approve each redownload, or require a linked Plex account (off by default) |
@@ -50,11 +52,11 @@ Search results and replies are ephemeral, so only the person who asked sees them
 
 1. Go to <https://discord.com/developers/applications> → **New Application**, and give it a name.
 2. **Bot** tab → **Reset Token** → copy it into `DISCORD_TOKEN`.
-   Leave all three **Privileged Gateway Intents** (Presence, Server Members, Message Content) **off**. The bot uses slash commands only. It connects with the `Guilds` intent, plus the non-privileged `GuildVoiceStates` intent when music streaming is configured.
-3. **Installation** or **OAuth2 → URL Generator**: choose the scopes **`bot`** and **`applications.commands`**, and these bot permissions: *View Channels, Send Messages, Embed Links, Attach Files, Read Message History, Manage Roles* (for the ping roles), *Connect* and *Speak* (for music). Or use this URL with your Application ID (from **General Information**):
+   Leave all three **Privileged Gateway Intents** (Presence, Server Members, Message Content) **off**. The bot uses slash commands only. It connects with the `Guilds` and `GuildMessages` intents (the second only so commands-only channels can remove messages; without Message Content it can't read them), plus the non-privileged `GuildVoiceStates` intent when music streaming is configured.
+3. **Installation** or **OAuth2 → URL Generator**: choose the scopes **`bot`** and **`applications.commands`**, and these bot permissions: *View Channels, Send Messages, Embed Links, Attach Files, Read Message History, Manage Roles* (for the ping roles), *Manage Messages* (for commands-only channels), *Connect* and *Speak* (for music). Or use this URL with your Application ID (from **General Information**):
 
    ```
-   https://discord.com/oauth2/authorize?client_id=YOUR_APPLICATION_ID&scope=bot%20applications.commands&permissions=271698944
+   https://discord.com/oauth2/authorize?client_id=YOUR_APPLICATION_ID&scope=bot%20applications.commands&permissions=271707136
    ```
 
    If the bot is already in your server, opening the new URL updates its permissions.
@@ -341,8 +343,10 @@ If a download fails, imports with a different problem or takes over 24 hours, it
 **Setup:** `/setup channels suggestions:#suggestions`.
 
 **Making the server chat-free:**
-1. For each text channel, edit **@everyone**: turn **Send Messages** (and **Create Threads**) off; leave **View Channel** and **Use Application Commands** on. Every bot command still works there, and the bot's replies are private, so nobody sees anyone else's requests.
-2. Make sure the bot itself can **Send Messages** and **Embed Links** in the suggestions, announcements and status channels.
+1. Where members should use commands (e.g. #general), run `/setup commands-only channel:#general mode:on`. Members can still type, so / commands work, but anything that isn't a command is removed straight away, and they get a friendly DM saying why (at most every 6 hours; a self-deleting note in the channel if their DMs are closed). Bots, admins, the server owner, system messages and pinned messages are never removed, and nothing from before you switched it on is touched. After a restart the bot cleans up what was posted while it was offline. It needs **Manage Messages** in those channels (the reply tells you if anything's missing). Turn **Create Threads** off for @everyone there too.
+   Discord briefly shows a removed message before it's gone (usually well under a second), so also do step 4: AutoMod blocks swear words before they're ever shown.
+   Good combo: a #commands channel that's commands-only, with `/setup help channel:#commands` posting the commands guide there (pin it). The guide shows only what everyone can use, and updates itself when the bot gets new commands. `/setup help remove:True` takes it down.
+2. Channels nobody needs to type in at all (#start-here, #announcements, #suggestions): turn **Send Messages** off for @everyone. Make sure the bot itself can **Send Messages** and **Embed Links** in the suggestions, announcements and status channels.
 3. If some people do want to chat: make a "Chat" role, let only that role see a chat channel, and don't give it to the people who shouldn't see it. They won't even know the channel exists.
 4. For any channel where people can still type, turn on **AutoMod** (Server Settings → AutoMod, desktop only) with the *Commonly Flagged Words* lists set to block the message. It misses mild swearing, so add your own words too.
 5. Anyone who shouldn't get DMs from other members can turn off *Allow direct messages from server members* in that server's privacy settings.

@@ -10,6 +10,7 @@ import type { ModuleFactory, SubcommandDef } from "../core/module.js";
 import { OPT_CATEGORIES } from "../core/roles.js";
 import { setChannel, setLink, type ChannelKey, type LinkKey } from "../core/settings.js";
 
+import { commandsOnlyChannels } from "./commandsOnly.js";
 import { SETUP } from "./parents.js";
 export { SETUP };
 
@@ -33,6 +34,7 @@ const LIVE_KEYS = [
   { key: "stats", label: "Stats board" },
   { key: "nowplaying", label: "Now playing board" },
   { key: "pings-panel", label: "Ping panel" },
+  { key: "help", label: "Commands guide" },
 ];
 
 export const settings: ModuleFactory = ({ cfg, store, client, roles, bus }) => {
@@ -101,8 +103,9 @@ export const settings: ModuleFactory = ({ cfg, store, client, roles, bus }) => {
         { name: "Links", value: LINKS.map((l) => `${l.label}: ${cfg.links[l.key] ?? "*not set*"}`).join("\n") },
         { name: "Posts and boards", value: live.join("\n") },
         { name: "Ping roles", value: OPT_CATEGORIES.map((c) => `${c.emoji} ${c.name}: ${roles.get(c.key) ? `<@&${roles.get(c.key)}>` : "*not created yet*"}`).join("\n") },
+        { name: "Commands-only channels", value: Object.keys(commandsOnlyChannels(store)).map((id) => `<#${id}>`).join(", ") || "*none* (`/setup commands-only`)" },
       )
-      .setFooter({ text: "Change with /setup channels, /setup links, /setup welcome, /setup plezy, /setup stats, /setup nowplaying" });
+      .setFooter({ text: "Change with /setup channels, /setup links, /setup welcome, /setup plezy, /setup stats, /setup nowplaying, /setup help, /setup commands-only" });
     await i.reply({ embeds: [e], flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
   }
 

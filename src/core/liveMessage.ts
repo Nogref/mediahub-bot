@@ -54,6 +54,17 @@ export class LiveMessage {
     return msg;
   }
 
+  /** Takes it down for good (deletes the message and forgets where it was). */
+  async remove(): Promise<boolean> {
+    const loc = this.location;
+    if (!loc) return false;
+    this.store.kvDelete(`live.${this.key}`);
+    this.cached = undefined;
+    const ch = await this.channel(loc.channelId);
+    if (ch && "messages" in ch) await ch.messages.delete(loc.messageId).catch(() => undefined);
+    return true;
+  }
+
   /** Edits the live message; reposts it if it was deleted. No-op when it was never placed. */
   async update(payload: LivePayload): Promise<boolean> {
     const loc = this.location;

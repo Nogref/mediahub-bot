@@ -18,6 +18,7 @@ import { redownload } from "./redownload.js";
 import { report } from "./report.js";
 import { requestTracker } from "./requestTracker.js";
 import { settings } from "./settings.js";
+import { commandsOnly } from "./commandsOnly.js";
 import { stats } from "./stats.js";
 import { suggestions } from "./suggestions.js";
 import { statusBoard } from "./statusBoard.js";
@@ -30,6 +31,7 @@ export const moduleFactories: ModuleFactory[] = [
   myRequests, //    /requests                    → your requests + live progress
   report, //        /report                      → Seerr issues, DM when fixed
   suggestions, //   /suggest + /admin suggestions … → ideas posted for 👍 votes, family-friendly
+  commandsOnly, //  /setup commands-only          → removes non-command messages in chosen channels
   // Order matters for menus: /admin lists redownloads, then plex, then aurral;
   // /invite lists create/list/revoke before aurral.
   redownload, //    /redownload … + /admin redownloads … → members replace broken files themselves
