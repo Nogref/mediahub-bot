@@ -170,31 +170,27 @@ export const suggestions: ModuleFactory = ({ cfg, store, client, access }) => {
   }
 
   function form(draft?: Draft) {
+    const title = new TextInputBuilder()
+      .setCustomId("title")
+      .setLabel("Your idea")
+      .setPlaceholder("e.g. A kids' movies section (for a movie or show, use /request)")
+      .setStyle(TextInputStyle.Short)
+      .setMinLength(5)
+      .setMaxLength(100)
+      .setRequired(true);
+    const details = new TextInputBuilder()
+      .setCustomId("details")
+      .setLabel("Tell us more (optional)")
+      .setStyle(TextInputStyle.Paragraph)
+      .setMaxLength(1000)
+      .setRequired(false);
+    // Only pre-fill what they actually wrote: Discord rejects a pre-filled value shorter than the minimum, even an empty one.
+    if (draft?.title) title.setValue(draft.title.slice(0, 100));
+    if (draft?.details) details.setValue(draft.details.slice(0, 1000));
     return new ModalBuilder()
       .setCustomId("sug:new")
       .setTitle("Share an idea")
-      .addComponents(
-        new ActionRowBuilder<TextInputBuilder>().addComponents(
-          new TextInputBuilder()
-            .setCustomId("title")
-            .setLabel("Your idea")
-            .setPlaceholder("e.g. A kids' movies section (for a movie or show, use /request)")
-            .setStyle(TextInputStyle.Short)
-            .setMinLength(5)
-            .setMaxLength(100)
-            .setRequired(true)
-            .setValue(draft?.title ?? ""),
-        ),
-        new ActionRowBuilder<TextInputBuilder>().addComponents(
-          new TextInputBuilder()
-            .setCustomId("details")
-            .setLabel("Tell us more (optional)")
-            .setStyle(TextInputStyle.Paragraph)
-            .setMaxLength(1000)
-            .setRequired(false)
-            .setValue(draft?.details ?? ""),
-        ),
-      );
+      .addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(title), new ActionRowBuilder<TextInputBuilder>().addComponents(details));
   }
 
   const channelLink = (channelId: string, messageId: string) => `https://discord.com/channels/${cfg.guildId}/${channelId}/${messageId}`;
@@ -419,22 +415,19 @@ export const suggestions: ModuleFactory = ({ cfg, store, client, access }) => {
         log.info(`suggestions: #${s.id} removed by ${i.user.id}`);
         return void (await i.update({ content: `🗑️ Removed suggestion #${s.id}. They weren't notified.`, components: [] }));
       }
+      const note = new TextInputBuilder()
+        .setCustomId("note")
+        .setLabel("A note for everyone (optional)")
+        .setPlaceholder("e.g. Added! Check the Kids library.")
+        .setStyle(TextInputStyle.Paragraph)
+        .setMaxLength(300)
+        .setRequired(false);
+      if (s.note) note.setValue(s.note.slice(0, 300));
       return void (await i.showModal(
         new ModalBuilder()
           .setCustomId(`sug:note:${s.id}:${status}`)
           .setTitle(`${STATUS[status as Exclude<Status, "removed">].label.slice(0, 40)}`)
-          .addComponents(
-            new ActionRowBuilder<TextInputBuilder>().addComponents(
-              new TextInputBuilder()
-                .setCustomId("note")
-                .setLabel("A note for everyone (optional)")
-                .setPlaceholder("e.g. Added! Check the Kids library.")
-                .setStyle(TextInputStyle.Paragraph)
-                .setMaxLength(300)
-                .setRequired(false)
-                .setValue(s.note ?? ""),
-            ),
-          ),
+          .addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(note)),
       ));
     }
 

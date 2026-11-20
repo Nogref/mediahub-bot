@@ -44,9 +44,18 @@ const text = (p) => (typeof p === "string" ? p : [p?.content ?? "", ...(p?.embed
 const posted = (client, ch) => client.sent.filter((x) => x.channelId === ch);
 async function suggest(env, values, extra = {}) {
   const open = await slash(env.registry, "suggest", undefined, {}, extra);
-  assert.equal(open.log.at(-1).type, "modal", text(open.last()));
+  assert.equal(open.log.at(-1).type, "modal", `no form shown: ${text(open.last())}`);
   return modal(env.registry, "sug:new", values, extra);
 }
+
+test("/suggest opens a clean form the first time (nothing pre-filled)", async () => {
+  const env = setup();
+  const open = await slash(env.registry, "suggest");
+  const form = open.log.at(-1).m;
+  assert.equal(open.log.at(-1).type, "modal");
+  assert.equal(form.components[0].components[0].value, undefined);
+  assert.equal(form.components[1].components[0].value, undefined);
+});
 
 test("filter: catches swearing and tricks, leaves normal ideas alone", () => {
   for (const bad of ["this is fucking great", "sh1t quality", "a$$hole"]) assert.ok(notFamilyFriendly(bad), bad);

@@ -143,6 +143,33 @@ export function fakeGuild(client) {
 }
 
 /** Minimal chat-input / component interaction double that records replies. */
+/**
+ * The checks Discord runs on a form before showing it (it answers 50035
+ * "Invalid Form Body" otherwise), so tests catch what the real API would reject.
+ */
+export function checkModal(json) {
+  const problems = [];
+  if (!json.custom_id || json.custom_id.length > 100) problems.push("custom_id");
+  if (!json.title || json.title.length > 45) problems.push(`title: ${json.title?.length ?? 0} chars (max 45)`);
+  if (!json.components?.length || json.components.length > 5) problems.push("1-5 rows");
+  for (const row of json.components ?? []) {
+    for (const c of row.components ?? []) {
+      if (c.label && c.label.length > 45) problems.push(`${c.custom_id}: label over 45`);
+      if (c.placeholder && c.placeholder.length > 100) problems.push(`${c.custom_id}: placeholder over 100`);
+      if (c.value !== undefined) {
+        if (c.value.length < (c.min_length ?? 0)) problems.push(`${c.custom_id}: value "${c.value}" shorter than min_length ${c.min_length}`);
+        if (c.max_length !== undefined && c.value.length > c.max_length) problems.push(`${c.custom_id}: value longer than max_length`);
+        if (c.value.length > 4000) problems.push(`${c.custom_id}: value over 4000`);
+      }
+    }
+  }
+  if (problems.length) {
+    const e = new Error(`Invalid Form Body (fake Discord): ${problems.join("; ")}`);
+    e.code = 50035;
+    throw e;
+  }
+}
+
 export function fakeInteraction({ options = {}, customId, userId = "u1", roles = [] } = {}) {
   const log = [];
   const i = {
@@ -169,7 +196,11 @@ export function fakeInteraction({ options = {}, customId, userId = "u1", roles =
     async reply(p) { i.replied = true; log.push({ type: "reply", p }); },
     async editReply(p) { log.push({ type: "edit", p: typeof p === "string" ? { content: p } : p }); },
     async update(p) { log.push({ type: "update", p }); },
-    async showModal(m) { log.push({ type: "modal", m: m.toJSON() }); },
+    async showModal(m) {
+      const json = m.toJSON();
+      checkModal(json);
+      log.push({ type: "modal", m: json });
+    },
     async followUp(p) { log.push({ type: "followUp", p: typeof p === "string" ? { content: p } : p }); },
     async respond(c) { log.push({ type: "autocomplete", c }); },
     last() { return log.filter((l) => l.type === "edit" || l.type === "reply" || l.type === "update").at(-1)?.p; },

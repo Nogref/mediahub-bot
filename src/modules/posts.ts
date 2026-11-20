@@ -174,8 +174,8 @@ export const posts: ModuleFactory = (ctx: AppContext) => {
       .setLabel("Title")
       .setStyle(TextInputStyle.Short)
       .setMaxLength(256)
-      .setRequired(true)
-      .setValue(c.title.slice(0, 256));
+      .setRequired(true);
+    if (c.title) title.setValue(c.title.slice(0, 256));
     modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(title));
     for (let n = 0; n < MAX_SECTIONS; n++) {
       const input = new TextInputBuilder()
