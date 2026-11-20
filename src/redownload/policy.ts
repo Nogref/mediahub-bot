@@ -10,13 +10,15 @@ import type { Target } from "./types.js";
 export interface PolicySettings {
   paused?: { by: string; reason?: string; at: number };
   approvals: boolean;
+  /** Only members with a linked Plex account on the share list (/plex link). Off by default. */
+  requirePlex: boolean;
   banned: Record<string, { by: string; reason?: string; at: number }>;
 }
 
 const KEY = "redownload.settings";
 
 export function loadSettings(store: Store): PolicySettings {
-  return { approvals: false, banned: {}, ...(store.kvGet<PolicySettings>(KEY) ?? {}) };
+  return { approvals: false, requirePlex: false, banned: {}, ...(store.kvGet<PolicySettings>(KEY) ?? {}) };
 }
 
 export function saveSettings(store: Store, s: PolicySettings): void {

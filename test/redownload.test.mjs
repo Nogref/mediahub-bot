@@ -152,9 +152,23 @@ test("/plex link: sign in, confirm the share list, never keep the token, one Dis
 });
 
 // ---- gates ----------------------------------------------------------------------------------
-test("gates: must be linked, on the share list, not banned, not paused; recycling bin required", async () => {
+test("open to every member by default: no Plex link needed", async () => {
   const env = setup();
-  let i = await slash(env.registry, "redownload", "start", { title: "m:1", problem: "video", details: "freezes at the bank scene" });
+  const { job } = await startJob(env, { title: "m:1" });
+  assert.equal(job.discordUserId, "u1");
+  assert.equal(job.plexUsername, undefined);
+  const st = await slash(env.registry, "redownload", "status");
+  assert.doesNotMatch(text(st.last()), /Plex account/, "no nagging about linking while it isn't required");
+  const ov = await slash(env.registry, "redownload", "overview", {}, ADMIN);
+  assert.match(text(ov.last()), /Open to every member of this server/);
+});
+
+test("gates (plex check on): must be linked, on the share list, not banned, not paused; recycling bin required", async () => {
+  const env = setup();
+  let i = await slash(env.registry, "redownload", "plexcheck", { mode: "on" });
+  assert.match(text(i.last()), /admins only/);
+  await slash(env.registry, "redownload", "plexcheck", { mode: "on" }, ADMIN);
+  i = await slash(env.registry, "redownload", "start", { title: "m:1", problem: "video", details: "freezes at the bank scene" });
   assert.match(text(i.last()), /link your Plex account with `\/plex link`/);
 
   link(env.rstore, "u1", 43, false);

@@ -5,10 +5,11 @@
  * through the app's recycling bin. Every step is logged for admins.
  *
  * Members:  /redownload start · status · cancel
- * Admins:   /redownload pause · resume · ban · unban · approvals · history · overview
+ * Admins:   /redownload pause · resume · ban · unban · approvals · plexcheck · history · overview
  *
- * Needs Radarr/Sonarr API keys (and Lidarr for albums). Members must have a
- * Plex account linked with /plex link that's on the server's share list.
+ * Needs Radarr/Sonarr API keys (and Lidarr for albums). Open to every member
+ * of the Discord server by default; `/redownload plexcheck on` limits it to
+ * members with a linked Plex account (/plex link) on the server's share list.
  */
 import {
   ActionRowBuilder,
@@ -135,9 +136,13 @@ export const redownload: ModuleFactory = (ctx) => {
     if (!me.admin) {
       const s = loadSettings(store);
       if (s.paused) return void (await i.editReply(`⏸️ Redownloads are paused by an admin${s.paused.reason ? `: ${s.paused.reason}` : ""}. Try again later.`));
-      const p = await confirmedPlex(i.user.id);
-      if (!p.ok) return void (await i.editReply(p.reason));
-      plexUsername = p.username;
+      if (s.requirePlex) {
+        const p = await confirmedPlex(i.user.id);
+        if (!p.ok) return void (await i.editReply(p.reason));
+        plexUsername = p.username;
+      } else {
+        plexUsername = rstore.link(i.user.id)?.plexUsername; // shown in the log when they've linked anyway
+      }
     } else {
       plexUsername = rstore.link(i.user.id)?.plexUsername;
     }
@@ -380,8 +385,10 @@ export const redownload: ModuleFactory = (ctx) => {
       me.admin
         ? "**Redownloads left:** unlimited (admin)"
         : `**Redownloads left:** ${Math.max(0, lim.dailyLimit - used)} of ${lim.dailyLimit}${used && nextFreeAt ? ` · next one frees up ${ts(nextFreeAt)}` : ""}`,
-      `**Plex account:** ${link ? `${link.plexUsername} ${link.hasAccess ? "✅" : "❌ not on the share list"}` : "not linked. Run `/plex link`"}`,
     ];
+    if (settings.requirePlex || link) {
+      lines.push(`**Plex account:** ${link ? `${link.plexUsername} ${link.hasAccess ? "✅" : "❌ not on the share list"}` : "not linked. Run `/plex link`"}`);
+    }
     if (settings.paused) lines.push("⏸️ Redownloads are paused right now.");
     if (settings.banned[i.user.id]) lines.push("🚫 You can't start redownloads right now.");
     const e = new EmbedBuilder().setColor(Colors.info).setTitle("🔁 Your redownloads").setDescription(lines.join("\n"));
@@ -448,8 +455,12 @@ export const redownload: ModuleFactory = (ctx) => {
       .setTitle("🔁 Redownloads")
       .setDescription(
         [
-          s.paused ? `⏸️ **Paused** by <@${s.paused.by}> ${ts(s.paused.at)}${s.paused.reason ? `: ${s.paused.reason}` : ""}` : "▶️ Open to linked members",
-          `Approve first: **${s.approvals ? "on" : "off"}**`,
+          s.paused
+            ? `⏸️ **Paused** by <@${s.paused.by}> ${ts(s.paused.at)}${s.paused.reason ? `: ${s.paused.reason}` : ""}`
+            : s.requirePlex
+              ? "▶️ Open to members with a linked Plex account on the share list"
+              : "▶️ Open to every member of this server",
+          `Approve first: **${s.approvals ? "on" : "off"}** · Plex check: **${s.requirePlex ? "on" : "off"}**`,
           `Limits: ${lim.dailyLimit} per member per 24h (a season counts 2) · ${lim.titleCooldownHours}h cooldown per title · ${lim.maxActive} at once · ${lim.maxAttempts} releases tried`,
           `Log channel: ${logCh ? `<#${logCh}>` : "⚠️ none set, so redownloads are only in the container log (use `/setup channels redownload_log:`)"}`,
           `Plex linking: ${plexTv ? `${rstore.links().length} member(s) linked` : "off (needs PLEX_URL and PLEX_TOKEN)"}`,
@@ -587,6 +598,35 @@ export const redownload: ModuleFactory = (ctx) => {
           log.info(`redownload: approvals ${on ? "on" : "off"} (${i.user.id})`);
           await i.reply({
             content: on ? "⏳ Approve-first is **on**. New redownloads wait for an Approve click in the log channel (auto-denied after 24h)." : "▶️ Approve-first is **off**. Redownloads start straight away.",
+            flags: MessageFlags.Ephemeral,
+          });
+        },
+      },
+      {
+        ...PARENT,
+        ...ADMIN,
+        name: "plexcheck",
+        description: "Admin: only allow members with a linked Plex account (/plex link)",
+        build: (b) =>
+          b.addStringOption((o) =>
+            o
+              .setName("mode")
+              .setDescription("On: /plex link and a confirmed share are required. Off: any member of this server")
+              .setRequired(true)
+              .addChoices({ name: "On", value: "on" }, { name: "Off", value: "off" }),
+          ),
+        execute: async (i) => {
+          const on = i.options.getString("mode", true) === "on";
+          if (on && !plexTv) {
+            await i.reply({ content: "Plex linking needs `PLEX_URL` and `PLEX_TOKEN` set first, so I left it off.", flags: MessageFlags.Ephemeral });
+            return;
+          }
+          update((s) => (s.requirePlex = on));
+          log.info(`redownload: plex check ${on ? "on" : "off"} (${i.user.id})`);
+          await i.reply({
+            content: on
+              ? `🔗 Plex check is **on**. Members need \`/plex link\` with an account on your share list before they can redownload (${rstore.links().filter((l) => l.hasAccess).length} confirmed so far).`
+              : "▶️ Plex check is **off**. Any member of this server can redownload (limits still apply).",
             flags: MessageFlags.Ephemeral,
           });
         },

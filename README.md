@@ -20,7 +20,7 @@ Two rules shape the design:
 | `/music radio` · `queue` · `skip` · `shuffle` · `stop` | everyone | Radio mode and queue control. The now-playing card also has buttons |
 | `/aurral signup [username]` | everyone | Creates your own Aurral account and DMs you the login (works in Subsonic apps too) |
 | `/aurral account` | everyone | Your Aurral username, the address, and how to listen in apps |
-| `/redownload start <title> <problem> <details> [season] [episode]` | everyone, Plex-linked | Replace a broken movie, episode, whole season or album with a fresh copy. Shows the replacement first; you can pick a different release |
+| `/redownload start <title> <problem> <details> [season] [episode]` | everyone | Replace a broken movie, episode, whole season or album with a fresh copy. Shows the replacement first; you can pick a different release |
 | `/redownload status` · `cancel` | everyone | Your redownloads, how many you have left, and stopping one before anything is replaced |
 | `/plex link` · `status` · `unlink` | everyone | Connect your Plex account with one sign-in (confirms you're on the server; your Plex sign-in isn't kept) |
 | `/plezy` | everyone | Posts the Plezy guide **publicly** in the current channel (for "how do I watch?" questions) |
@@ -36,7 +36,7 @@ Two rules shape the design:
 | `/aurral link user:@x username:…` | 🔒 admin | Connect a member to an Aurral account they already have |
 | `/statusboard repost` | 🔒 admin | Abandons the old status board and posts a fresh one |
 | `/redownload overview` · `history [user]` | 🔒 admin | Settings, safety checks (recycling bins), what's running; recent redownloads |
-| `/redownload pause` · `resume` · `ban` · `unban` · `approvals on/off` | 🔒 admin | Stop everyone or one member, or require an admin to approve each redownload |
+| `/redownload pause` · `resume` · `ban` · `unban` · `approvals on/off` · `plexcheck on/off` | 🔒 admin | Stop everyone or one member, require an admin to approve each redownload, or require a linked Plex account (off by default) |
 | `/plex linked` · `/plex remove user:@x` | 🔒 admin | Who's linked to which Plex account; unlink someone |
 
 🎟️ = admins and the Inviter role. 🔒 = admins. Everything else is open to every member.
@@ -307,9 +307,9 @@ Members fix broken files themselves instead of waiting for an admin. It's built 
 1. Add `RADARR_API_KEY` and `SONARR_API_KEY` (Lidarr is already set up for albums).
 2. In Radarr, Sonarr and Lidarr, set a **Recycling Bin**: Settings → Media Management → File Management (show advanced). Without one the apps delete files permanently, so the bot refuses to redownload anything from that app. `/redownload overview` shows a ✅ per app.
 3. Make a private admin channel and run `/setup channels redownload_log:#that-channel` (falls back to the admin channel).
-4. Members run `/plex link` once.
+4. Optional, for later: `/redownload plexcheck on` limits redownloads to members who've run `/plex link`.
 
-**Who can use it:** members whose linked Plex account is on your server's share list (re-checked every 6 hours, so removing someone in Plex locks them out). Admins always can, without limits. If a Plex account is already linked to another Discord member, it can't be linked again.
+**Who can use it:** every member of your Discord server (limits, bans and pause still apply). Admins always can, without limits. With `/redownload plexcheck on`, only members whose linked Plex account is on your server's share list can (re-checked every 6 hours, so removing someone in Plex locks them out). `/plex link` works either way; when someone has linked, the log shows their Plex username. A Plex account can only be linked to one Discord member.
 
 **Limits:** 2 per member per rolling 24 hours (a whole season counts as 2), 48 hours before the same title can be redone, 3 running at once server-wide. Anything that ends without changing a file (no release found, all downloads failed, cancelled, denied) is refunded. All of these are in `.env.example` (`REDOWNLOAD_*`).
 
@@ -325,7 +325,7 @@ If a download fails, imports with a different problem or takes over 24 hours, it
 
 **The log:** one message per redownload in the log channel, edited as it goes: who (Discord + Plex username), what, the problem and description, old vs. new release and a timeline. Buttons: **Cancel** (before the swap), **Approve / Deny** (approve-first mode), **Mark resolved** (needs admin) and **Ban requester**. The apps' own "manual interaction required" / "download failed" alerts for these downloads are kept out of the admin channel, since the log already covers them.
 
-**Admin controls:** `/redownload pause [reason]` / `resume`, `ban user [reason]` / `unban`, `approvals on|off` (each redownload waits for Approve; auto-denied after 24 hours), `history [user]`, `overview`.
+**Admin controls:** `/redownload pause [reason]` / `resume`, `ban user [reason]` / `unban`, `approvals on|off` (each redownload waits for Approve; auto-denied after 24 hours), `plexcheck on|off` (require `/plex link`; off by default), `history [user]`, `overview`.
 
 ## Music streaming
 
@@ -474,7 +474,7 @@ docker-entrypoint.sh    fixes /data ownership for PUID:PGID, then drops root
 | `/music` says the server "didn't send Opus audio" | Enable Opus transcoding on the Subsonic server (Navidrome: Settings → Transcoding) |
 | Bot joins voice but there's no sound | Check it has **Speak** in that channel, and that the Subsonic user can stream (try the same account in a Subsonic app) |
 | `/redownload` says redownloads "aren't fully set up" | The app has no Recycling Bin. Set it (see Self-serve redownloads); `/redownload overview` shows which app |
-| `/plex link` says the account isn't on the share list | They signed in with a different Plex account than the one you shared with, or the invite isn't accepted yet. Once fixed, they run `/plex link` again |
+| `/plex link` says the account isn't on the share list | They signed in with a different Plex account than the one you shared with, or the invite isn't accepted yet. Once fixed, they run `/plex link` again. This only blocks redownloads when `/redownload plexcheck` is on |
 | A redownload says 🆘 needs admin | Follow the log entry: finish the import in the app's Activity → Queue → Manual Import (or restore the old file from the recycling bin), then press **Mark resolved** |
 | Unraid can't pull the image | Make the GHCR package public, or `docker login ghcr.io` (see section 4) |
 
