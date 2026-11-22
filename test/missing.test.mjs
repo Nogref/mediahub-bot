@@ -11,6 +11,7 @@ import { moduleFactories } from "../dist/modules/index.js";
 import { setDefaultTimeout } from "../dist/core/http.js";
 import { RoleDirectory } from "../dist/core/roles.js";
 import { Access } from "../dist/core/access.js";
+import { pickFallback, qualityOnlyRejection } from "../dist/missing/engine.js";
 
 let mock;
 before(async () => {
@@ -145,7 +146,7 @@ test("whole season missing: season pack first, then one by one; what can't be fo
   assert.match(text(env.client.dms.at(-1).payload), /1 of 2 missing episodes.*let the admins know/s);
   const alert = env.client.sent.find((x) => x.channelId === "c-rdlog" && /couldn't get/.test(x.payload.content ?? ""));
   assert.match(alert.payload.content, /<@u1> asked for \*\*The Show · Season 2\*\* and I couldn't get 1 of 2/);
-  assert.match(alert.payload.content, /E02 · Lost One: no usable release found/);
+  assert.match(alert.payload.content, /E02 · Lost One: nothing out there in any quality/);
 });
 
 test("a season pack covers the whole season in one go", async () => {
@@ -236,4 +237,85 @@ test("shared switches: pause and approve-first apply; cancel from the tracker st
   assert.equal(env.mstore.job(id).state, "cancelled");
   assert.match(text(stop.last()), /Cancelled/);
   assert.ok(mock.calls.some((c) => c.method === "DELETE" && c.path.startsWith("/radarr/api/v3/queue/") && c.query.blocklist === "false"));
+});
+
+// ---- other qualities when the profile has nothing -------------------------------------------------
+const rel = (title, res, { rejections = [`${res === 2160 ? "WEBDL-2160p" : res === 720 ? "WEBDL-720p" : "WEBDL-1080p"} is not wanted in profile`], seeders = 30, size = 2e9, fullSeason = false, episodes, movie } = {}) => ({
+  guid: `g-${title}`,
+  indexerId: 3,
+  title,
+  quality: { quality: { name: `WEBDL-${res}p`, resolution: res } },
+  qualityWeight: 0,
+  size,
+  protocol: "torrent",
+  seeders,
+  rejections,
+  fullSeason,
+  _episodeIds: episodes,
+  _movieId: movie,
+});
+
+test("other-quality picking: only quality/score rejections; 1080p > 720p > 4K; never wrong language, dead or tiny", () => {
+  assert.ok(qualityOnlyRejection("WEBDL-720p is not wanted in profile"));
+  assert.ok(qualityOnlyRejection("Custom Formats x265 have score -10 below Series's profile minimum 0"));
+  assert.ok(!qualityOnlyRejection("Language German is not wanted in profile"));
+  assert.ok(!qualityOnlyRejection("Release is blocklisted"));
+  const pick = (rs) => pickFallback(rs, "episode")?.title;
+  assert.equal(pick([rel("a-4k", 2160), rel("b-720", 720), rel("c-german", 1080, { rejections: ["Language German is not wanted in profile"] })]), "b-720");
+  assert.equal(pick([rel("a-4k", 2160), rel("dead-1080", 1080, { seeders: 0 }), rel("tiny-720", 720, { size: 1e6 })]), "a-4k");
+  assert.equal(pick([rel("blocked", 720, { rejections: ["WEBDL-720p is not wanted in profile", "Release is blocklisted"] })]), undefined);
+});
+
+test("nothing in the profile: grabs another quality, tags it off-profile, tells admins exactly what, tells the member gently", async () => {
+  const env = setup();
+  mock.state.fallback.episodes[503] = [
+    rel("The.Show.S01E03.GERMAN.1080p", 1080, { rejections: ["Language German is not wanted in profile"], episodes: [503] }),
+    rel("The.Show.S01E03.720p.WEB", 720, { episodes: [503] }),
+    rel("The.Show.S01E03.2160p.WEB", 2160, { episodes: [503] }),
+  ];
+  const { id } = await ask(env, { title: "s:5" }, { season: 1 });
+  await waitFor(() => mock.state.commands.some((c) => c.name === "EpisodeSearch"));
+  let j = await settle(env, id);
+  assert.equal(j.state, "downloading");
+  assert.deepEqual(j.items[0].offProfile, { quality: "WEBDL-720p", release: "The.Show.S01E03.720p.WEB" });
+  const grab = mock.calls.find((c) => c.method === "POST" && c.path === "/sonarr/api/v3/release");
+  assert.equal(grab.body.guid, "g-The.Show.S01E03.720p.WEB", "720p beats 4K, and the German one is never picked");
+
+  const tag = mock.state.tags.find((t) => t.app === "sonarr");
+  assert.equal(tag.label, "off-profile");
+  assert.deepEqual(mock.state.tagged.at(-1), { app: "sonarr", seriesIds: [5], tags: [tag.id], applyTags: "add" });
+  const notice = env.client.sent.find((x) => x.channelId === "c-rdlog" && /🟠/.test(x.payload.content ?? ""));
+  assert.match(notice.payload.content, /nothing was out there in your quality profile.*E03 · Three: \*\*WEBDL-720p\*\*.*The\.Show\.S01E03\.720p\.WEB.*Tagged \*\*off-profile\*\* in Sonarr/s);
+  const card = text(env.client.messages.get(j.trackerMessageId).edits.at(-1));
+  assert.match(card, /E03 · Three \(720p copy\)/);
+  assert.doesNotMatch(card, /profile|WEBDL|tag/i, "members don't get the jargon");
+
+  mock.arrive(503);
+  await env.engine.tick(id);
+  j = env.mstore.job(id);
+  assert.equal(j.state, "done");
+  assert.match(text(env.client.dms.at(-1).payload), /on Plex now! It's a 720p copy for now, since that's all that was out there/);
+});
+
+test("whole season with nothing in the profile: one other-quality season pack covers it", async () => {
+  const env = setup();
+  mock.state.fallback.seasons["5:2"] = [rel("The.Show.S02.2160p.PACK", 2160, { fullSeason: true, size: 20e9, episodes: [601, 602] })];
+  const { id } = await ask(env, { title: "s:5", season: 2 });
+  await waitFor(() => mock.state.commands.some((c) => c.name === "SeasonSearch"));
+  const j = await settle(env, id, 8);
+  assert.deepEqual(j.items.map((i) => [i.state, i.offProfile?.quality]), [["downloading", "WEBDL-2160p"], ["downloading", "WEBDL-2160p"]]);
+  assert.equal(mock.calls.filter((c) => c.method === "POST" && c.path === "/sonarr/api/v3/release").length, 1, "one pack, not one grab per episode");
+});
+
+test("movies too: no copy in the profile → another quality, tagged in Radarr", async () => {
+  const env = setup();
+  mock.state.fallback.movies[2] = [rel("Alien.1979.720p.BluRay", 720, { size: 4e9, movie: 2 })];
+  const { id } = await ask(env, { title: "m:2" });
+  await waitFor(() => mock.state.commands.some((c) => c.name === "MoviesSearch"));
+  const j = await settle(env, id);
+  assert.equal(j.items[0].offProfile.release, "Alien.1979.720p.BluRay");
+  assert.deepEqual(mock.state.tagged.at(-1).movieIds, [2]);
+  mock.arrive(2, "radarr");
+  await env.engine.tick(id);
+  assert.equal(env.mstore.job(id).state, "done");
 });

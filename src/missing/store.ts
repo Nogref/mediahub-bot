@@ -22,6 +22,8 @@ export interface MissingItem {
   blockedSince?: number;
   /** The app's own reason when something's wrong (admins see it, members don't). */
   message?: string;
+  /** Grabbed in a quality outside the profile, because nothing in-profile existed. */
+  offProfile?: { quality: string; release: string };
 }
 
 export interface MissingTarget {
@@ -45,7 +47,10 @@ export interface MissingJob {
   target: MissingTarget;
   items: MissingItem[];
   state: MissingState;
-  phase?: "season" | "episodes" | "movie";
+  phase?: "season" | "episodes" | "movie" | "fallback";
+  /** Items still to try in other qualities. */
+  fallbackQueue?: number[];
+  fallbackSeasonTried?: boolean;
   commandId?: number;
   commandStartedAt?: number;
   commandFinishedAt?: number;

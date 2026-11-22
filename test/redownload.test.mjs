@@ -254,6 +254,20 @@ test("movie: grab → download (old copy kept) → swap via recycling bin → im
   assert.match(text(again.last()), /replaced recently/);
 });
 
+test("details are optional: just the problem type is enough", async () => {
+  const env = setup();
+  const i = await slash(env.registry, "redownload", "start", { title: "m:1", problem: "audio" });
+  const card = i.last();
+  assert.match(text(card), /Audio missing or out of sync/);
+  assert.doesNotMatch(text(card), /> /, "no empty quote line");
+  const sid = card.components[0].toJSON().components[0].custom_id.split(":")[2];
+  const go = await click(env.registry, `rdc:go:${sid}`);
+  const id = Number(text(go.last()).match(/#(\d+)/)[1]);
+  assert.equal(env.rstore.job(id).details, "");
+  const logPost = env.client.sent.find((x) => x.channelId === "c-rdlog");
+  assert.match(JSON.stringify(json(logPost.payload.embeds[0])), /Audio missing or out of sync \(no details given\)/);
+});
+
 test("manual pick: the member's chosen release goes first; the rest stay as fallbacks", async () => {
   const env = setup();
   link(env.rstore);

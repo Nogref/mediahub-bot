@@ -49,7 +49,7 @@ export function logEmbed(j: Job): EmbedBuilder {
     .setDescription(`**${STATE_TEXT[j.state]}**${j.progress !== undefined && j.state === "downloading" ? ` (${j.progress}%)` : ""}${j.outcome ? `\n${j.outcome}` : ""}`)
     .addFields(
       { name: "Requested by", value: `<@${j.discordUserId}>${j.plexUsername ? ` · Plex: ${j.plexUsername}` : ""}${j.bypassLimits ? " · admin" : ""}`, inline: false },
-      { name: "Reason", value: truncate(`${PROBLEMS[j.problem] ?? j.problem}: ${j.details}`, 1024) },
+      { name: "Reason", value: truncate(`${PROBLEMS[j.problem] ?? j.problem}${j.details ? `: ${j.details}` : " (no details given)"}`, 1024) },
       { name: "Replacing", value: truncate(oldText, 1024), inline: true },
     )
     .setFooter({ text: `${j.target.app} · attempt ${Math.max(j.attempt, 1)} · id ${j.id}` })

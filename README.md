@@ -19,7 +19,7 @@ Two rules shape the design:
 | `/music play <song/album/artist/playlist>` | everyone | Plays the library in your voice channel (autocomplete; `next:` puts it at the front) |
 | `/music radio` · `queue` · `skip` · `shuffle` · `stop` | everyone | Radio mode and queue control. The now-playing card also has buttons |
 | `/aurral [username]` | everyone | Your own Aurral music account: creates it and DMs you the login (works in Subsonic apps too), or shows your login if you have one |
-| `/redownload start <title> <problem> <details> [season] [episode]` | everyone | Replace a broken movie, episode, whole season or album with a fresh copy. Shows the replacement first; you can pick a different copy |
+| `/redownload start <title> <problem> [details] [season] [episode]` | everyone | Replace a broken movie, episode, whole season or album with a fresh copy. Shows the replacement first; you can pick a different copy |
 | `/missing [title] [season]` | everyone | Episodes that aired but aren't on Plex, or a movie that never downloaded: pick it, and the bot finds and downloads it with a live tracker. On its own, shows your searches |
 | `/redownload status` | everyone | Your live redownload tracker(s), with Refresh/Cancel buttons, and how many you have left |
 | `/suggest` | everyone | Share an idea in a short form. The bot posts it in the suggestions channel (after a family-friendly check) for others to 👍, and DMs you when an admin responds |
@@ -318,7 +318,7 @@ Members fix broken files themselves instead of waiting for an admin. It's built 
 **Limits:** 2 per member per rolling 24 hours (a whole season counts as 2), 48 hours before the same title can be redone, 3 running at once server-wide. Anything that ends without changing a file (no release found, all downloads failed, cancelled, denied) is refunded. All of these are in `.env.example` (`REDOWNLOAD_*`).
 
 **What happens:**
-1. The member picks the title (autocomplete across Radarr, Sonarr and Lidarr), a problem type and a description. For TV, a season is required; leaving the episode empty means the whole season.
+1. The member picks the title (autocomplete across Radarr, Sonarr and Lidarr) and a problem type, plus an optional description. For TV, a season is required; leaving the episode empty means the whole season.
 2. The bot runs an interactive search in the app and keeps only releases the app rejected *purely* because a file already exists. So it never picks something your quality profile doesn't want, a blocklisted release, the same release as the current file, a sample or fake (too small), or a dead torrent. Seasons only take season packs; single episodes never do. Best quality first, then custom-format score, then seeders.
 3. The member sees what's on Plex now vs. the replacement, and can **Pick a different release** from the top 10.
 4. The app downloads it. **The old file stays playable the whole time.**
@@ -341,7 +341,14 @@ If a download fails, imports with a different problem or takes over 24 hours, it
 
 **What it does:** it marks the chosen episodes (or the movie) monitored, then asks Sonarr/Radarr to search. A season with nothing downloaded is searched as a season pack first; whatever that doesn't cover is searched episode by episode. It follows each grab through the download queue until it's imported.
 
-**When something can't be found:** the member is told plainly, and a short message goes to the redownload log (falling back to the admin channel) listing what couldn't be got and why (no release found, download disappeared, or downloaded but won't import after 30 minutes), plus where to look in Sonarr/Radarr. Members can't search the same title again for 6 hours after that; admins can.
+**When nothing's out there in your quality profile:** rather than leave someone with nothing, the bot runs an interactive search for those episodes (or the movie) and accepts releases rejected *only* for quality or custom-format score. Wrong language, blocklisted, wrong title, size limits and so on are never accepted, and dead torrents and samples are skipped. It prefers 1080p, then 720p, then 4K, then SD, then healthier and smaller. For a whole missing season it tries one season pack first. Anything grabbed this way:
+- is posted in the log as its own message, naming each episode, the quality and the exact release;
+- gets the series or movie tagged **off-profile** in Sonarr/Radarr, so you can filter for them later. The tag isn't linked to any indexer, client or profile, so it changes nothing on its own;
+- shows members a quiet "(720p copy)" note, with no jargon, and their final DM says it's that quality for now.
+
+If upgrades are allowed in that quality profile, Sonarr/Radarr will usually replace it with your normal quality when one turns up, since the episode stays monitored.
+
+**When something can't be found:** even in other qualities, the member is told plainly, and a short message goes to the redownload log (falling back to the admin channel) listing what couldn't be got and why (no release found, download disappeared, or downloaded but won't import after 30 minutes), plus where to look in Sonarr/Radarr. Members can't search the same title again for 6 hours after that; admins can.
 
 **Shared switches:** pause, bans, approve-first and the Plex check under `/admin redownloads` apply to `/missing` too, and `/admin redownloads overview` lists searches in progress. One search per season at a time; at most 10 at once server-wide.
 

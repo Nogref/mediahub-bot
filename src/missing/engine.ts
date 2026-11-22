@@ -17,6 +17,7 @@ import { dm, truncate } from "../core/discord.js";
 import { ApiError } from "../core/http.js";
 import { log } from "../core/logger.js";
 import type { ArrApi } from "../redownload/arr.js";
+import { friendlyQuality } from "../redownload/tracker.js";
 import { ENDED, logButtons, logEmbed, trackerPayload, trackerSignature } from "./render.js";
 import type { ItemState, MissingItem, MissingJob, MissingState, MissingStore } from "./store.js";
 
@@ -31,6 +32,37 @@ const IMPORT_STUCK = 30 * MIN;
 const JOB_DEADLINE = 48 * 60 * MIN;
 const APPROVAL_EXPIRY = 24 * 60 * MIN;
 const TERMINAL: ItemState[] = ["imported", "not_found", "failed", "stuck"];
+const FALLBACK_PER_TICK = 3;
+const OFF_PROFILE_TAG = "off-profile";
+
+/** Rejected only for quality (or custom-format score): fine as a stopgap. Language, size, wrong title, blocklisted etc. never are. */
+export function qualityOnlyRejection(r: string): boolean {
+  if (/language/i.test(r)) return false;
+  return /\bnot wanted in profile\b/i.test(r) || /custom formats?.*\bbelow\b.*\bminimum\b/i.test(r);
+}
+
+const MIN_SIZE = { episode: 50 * 1024 ** 2, season: 200 * 1024 ** 2, movie: 300 * 1024 ** 2 };
+const RESOLUTION_ORDER = [1080, 720, 2160, 576, 480];
+
+/**
+ * The best release outside the quality profile, for when nothing inside it
+ * exists: 1080p, then 720p, then 4K, then SD; healthy torrents; not tiny.
+ */
+export function pickFallback(releases: Json[], kind: keyof typeof MIN_SIZE): Json | undefined {
+  const text = (x: any) => (typeof x === "string" ? x : (x?.reason ?? x?.message ?? String(x)));
+  const resOf = (r: Json) => Number(r.quality?.quality?.resolution) || Number(String(r.quality?.quality?.name ?? "").match(/(2160|1080|720|576|480)p/)?.[1]) || 0;
+  const rank = (r: Json) => {
+    const i = RESOLUTION_ORDER.indexOf(resOf(r));
+    return i === -1 ? RESOLUTION_ORDER.length : i;
+  };
+  const health = (r: Json) => (String(r.protocol).toLowerCase() === "torrent" ? Math.min(r.seeders ?? 0, 50) : 50);
+  return releases
+    .filter((r) => (r.rejections ?? []).map(text).every(qualityOnlyRejection))
+    .filter((r) => !(String(r.protocol).toLowerCase() === "torrent" && (r.seeders ?? 0) < 1))
+    .filter((r) => (r.size ?? 0) >= MIN_SIZE[kind] && !/\bsample\b/i.test(r.title ?? ""))
+    .filter((r) => (kind === "season" ? r.fullSeason : !r.fullSeason))
+    .sort((a, b) => rank(a) - rank(b) || health(b) - health(a) || (a.size ?? 0) - (b.size ?? 0))[0];
+}
 
 export interface MissingDeps {
   api: { sonarr?: ArrApi; radarr?: ArrApi };
@@ -137,6 +169,7 @@ export class MissingEngine {
   }
 
   private async searching(j: MissingJob) {
+    if (j.phase === "fallback") return this.fallback(j);
     if (!j.commandId) {
       const ids = j.items.map((i) => i.id);
       const kind = j.target.kind === "movie" ? "movie" : j.target.wholeSeason && ids.length > 1 ? "season" : "episodes";
@@ -163,13 +196,117 @@ export class MissingEngine {
         "episodes",
       );
     }
-    for (const it of ungrabbed) {
-      it.state = "not_found";
-      it.message = String(cmd.status ?? "").toLowerCase() === "failed" ? `search failed: ${truncate(String(cmd.message ?? cmd.exception ?? ""), 80)}` : "no usable release found";
+    if (ungrabbed.length) {
+      // Nothing in the quality profile: rather than leave them with nothing, look at other qualities.
+      j.phase = "fallback";
+      j.fallbackQueue = ungrabbed.map((i) => i.id);
+      for (const it of ungrabbed) it.message = String(cmd.status ?? "").toLowerCase() === "failed" ? `search failed: ${truncate(String(cmd.message ?? cmd.exception ?? ""), 80)}` : undefined;
+      await this.event(j, `🔄 Nothing in the usual quality for ${ungrabbed.map((i) => i.label.split(" ·")[0]).join(", ")}; trying other qualities`);
+      return;
     }
-    if (ungrabbed.length) await this.event(j, `😕 Nothing found for ${ungrabbed.map((i) => i.label.split(" ·")[0]).join(", ")}`);
     if (j.items.every((i) => TERMINAL.includes(i.state))) return this.finish(j);
     await this.event(j, "⬇️ Downloading", "downloading");
+  }
+
+  /** Interactive searches for what the normal search couldn't find, accepting other qualities. A few per tick. */
+  private async fallback(j: MissingJob) {
+    const a = this.api(j);
+    const t = j.target;
+    await this.refresh(j); // late grabs from the normal search still count
+    const pending = () => (j.fallbackQueue ?? []).filter((id) => j.items.find((i) => i.id === id)?.state === "searching");
+    j.fallbackQueue = pending();
+    const got: MissingItem[] = [];
+
+    const take = async (release: Json, items: MissingItem[]) => {
+      await a.call(`/release`, { method: "POST", body: { guid: release.guid, indexerId: release.indexerId }, timeoutMs: 60_000 });
+      const offProfile = (release.rejections ?? []).length > 0;
+      for (const it of items) {
+        if (offProfile) it.offProfile = { quality: release.quality?.quality?.name ?? "other quality", release: release.title };
+        it.state = "downloading";
+        it.grabbedAt = Date.now();
+        it.message = undefined;
+        if (offProfile) got.push(it);
+      }
+      j.fallbackQueue = (j.fallbackQueue ?? []).filter((id) => !items.some((i) => i.id === id));
+    };
+
+    // A whole missing season: one off-profile season pack beats a dozen single episodes.
+    if (t.kind === "episodes" && t.wholeSeason && !j.fallbackSeasonTried && j.fallbackQueue.length === j.items.length && j.items.length > 1) {
+      j.fallbackSeasonTried = true;
+      const rels = await a.call<Json[]>(`/release`, { query: { seriesId: t.seriesId, seasonNumber: t.seasonNumber }, timeoutMs: 120_000 });
+      const pack = pickFallback(rels, "season");
+      if (pack) await take(pack, j.items.filter((i) => i.state === "searching"));
+    }
+
+    for (const id of [...j.fallbackQueue].slice(0, FALLBACK_PER_TICK)) {
+      const it = j.items.find((i) => i.id === id)!;
+      const rels = await a.call<Json[]>(`/release`, { query: t.kind === "movie" ? { movieId: t.movieId } : { episodeId: id }, timeoutMs: 120_000 });
+      const best = pickFallback(rels, t.kind === "movie" ? "movie" : "episode");
+      if (best) {
+        try {
+          await take(best, [it]);
+          continue;
+        } catch (err) {
+          it.message = `couldn't grab the other-quality copy: ${truncate((err as Error).message, 80)}`;
+        }
+      }
+      it.state = "not_found";
+      it.message ??= "nothing out there in any quality";
+      j.fallbackQueue = j.fallbackQueue.filter((x) => x !== id);
+    }
+
+    if (got.length) {
+      await this.tagOffProfile(j);
+      await this.alertOffProfile(j, got);
+      await this.event(j, `🟠 Grabbed another quality for ${got.map((i) => i.label.split(" ·")[0]).join(", ")}`);
+    }
+    if (j.fallbackQueue.length) {
+      this.save(j);
+      return this.updateTracker(j);
+    }
+    const none = j.items.filter((i) => i.state === "not_found");
+    if (none.length) await this.event(j, `😕 Nothing in any quality for ${none.map((i) => i.label.split(" ·")[0]).join(", ")}`);
+    if (j.items.every((i) => TERMINAL.includes(i.state))) return this.finish(j);
+    await this.event(j, "⬇️ Downloading", "downloading");
+  }
+
+  private tagIds = new Map<string, number>();
+
+  /** Tags the show/movie "off-profile" in Sonarr/Radarr so admins can find what needs a proper copy later. */
+  private async tagOffProfile(j: MissingJob) {
+    const a = this.api(j);
+    try {
+      let tagId = this.tagIds.get(j.target.app);
+      if (tagId === undefined) {
+        const tags = await a.call<Json[]>(`/tag`);
+        tagId = tags.find((x) => String(x.label).toLowerCase() === OFF_PROFILE_TAG)?.id ?? (await a.call<Json>(`/tag`, { method: "POST", body: { label: OFF_PROFILE_TAG } })).id;
+        this.tagIds.set(j.target.app, tagId!);
+      }
+      if (j.target.kind === "movie") await a.call(`/movie/editor`, { method: "PUT", body: { movieIds: [j.target.movieId], tags: [tagId], applyTags: "add" } });
+      else await a.call(`/series/editor`, { method: "PUT", body: { seriesIds: [j.target.seriesId], tags: [tagId], applyTags: "add" } });
+    } catch (err) {
+      log.warn(`missing #${j.id}: couldn't tag it ${OFF_PROFILE_TAG}: ${(err as Error).message}`);
+    }
+  }
+
+  /** Tells admins exactly what was grabbed outside the profile (its own message, so it's noticed). */
+  private async alertOffProfile(j: MissingJob, items: MissingItem[]) {
+    const id = this.logChannelId();
+    if (!id) return;
+    const ch = await this.d.client.channels.fetch(id).catch(() => null);
+    if (!ch?.isSendable()) return;
+    const app = j.target.app === "sonarr" ? "Sonarr" : "Radarr";
+    const lines = items.map((i) => `• ${i.label}: **${i.offProfile!.quality}** (\`${truncate(i.offProfile!.release, 90)}\`)`);
+    await (ch as SendableChannels)
+      .send({
+        content: truncate(
+          `🟠 **${j.target.label}** (asked for by <@${j.discordUserId}>): nothing was out there in your quality profile, so I grabbed another quality to get it on Plex now:\n${lines.join("\n")}\n` +
+            `-# Tagged **${OFF_PROFILE_TAG}** in ${app}. If upgrades are allowed in that quality profile, ${app} replaces it with your usual quality when that turns up.`,
+          2000,
+        ),
+        allowedMentions: { parse: [] },
+      })
+      .catch(() => undefined);
   }
 
   // ---- downloading ------------------------------------------------------------------------------
@@ -424,8 +561,13 @@ export class MissingEngine {
       cancelled: `🛑 An admin stopped the search for ${label}.`,
       denied: `🚫 Your request for ${label} wasn't approved.`,
     };
-    const line = text[j.state];
+    let line = text[j.state];
     if (!line) return;
+    const other = j.items.filter((i) => i.state === "imported" && i.offProfile);
+    if (other.length && (j.state === "done" || j.state === "partial")) {
+      const q = [...new Set(other.map((i) => friendlyQuality(i.offProfile!.quality)))].join("/");
+      line += ` ${j.items.length === 1 ? "It's" : other.length === j.items.length ? "They're" : "Some are"} a ${q} copy for now, since that's all that was out there.`;
+    }
     const sent = await dm(this.d.client, j.discordUserId, line);
     if (!sent && this.d.cfg.channels.notify) {
       const ch = await this.d.client.channels.fetch(this.d.cfg.channels.notify).catch(() => null);

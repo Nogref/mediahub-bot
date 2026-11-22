@@ -100,13 +100,12 @@ export const redownload: ModuleFactory = (ctx) => {
   async function start(i: ChatInputCommandInteraction) {
     const pick = i.options.getString("title", true).trim();
     const problem = i.options.getString("problem", true);
-    const details = i.options.getString("details", true).trim();
+    const details = i.options.getString("details")?.trim() ?? "";
     const season = i.options.getInteger("season") ?? undefined;
     const episode = i.options.getInteger("episode") ?? undefined;
     const me = who(i);
     await i.deferReply({ flags: MessageFlags.Ephemeral });
 
-    if (details.length < 10) return void (await i.editReply("Please describe the problem in a few more words (what you saw, and roughly when)."));
     if (episode !== undefined && season === undefined) return void (await i.editReply("Add the **season** too, so I know which episode you mean."));
 
     let plexUsername: string | undefined;
@@ -205,7 +204,7 @@ export const redownload: ModuleFactory = (ctx) => {
       .setColor(Colors.info)
       .setTitle(truncate(`🔁 Replace ${s.target.label}?`, 256))
       .setDescription(
-        `**Problem:** ${PROBLEMS[s.problem] ?? s.problem}\n> ${truncate(s.details, 300)}\n\n` +
+        `**Problem:** ${PROBLEMS[s.problem] ?? s.problem}${s.details ? `\n> ${truncate(s.details, 300)}` : ""}\n\n` +
           "**What happens next:** I download the new copy while your current one keeps working. When it's ready, I swap it in (the old one is kept as a backup). " +
           "I'll keep you posted in your DMs the whole way." +
           (settings.approvals && !s.admin ? "\n\n⏳ An admin will need to OK it first." : ""),
@@ -290,7 +289,7 @@ export const redownload: ModuleFactory = (ctx) => {
       bypassLimits: s.admin,
       events: [{ at: Date.now(), text: `🙋 Requested by <@${s.userId}>${s.chosen === 0 ? "" : " (picked the release)"}` }],
     });
-    log.info(`redownload #${job.id}: ${s.userId} (${s.plexUsername ?? "no plex"}) → ${s.target.label} [${s.problem}] ${truncate(s.details, 120)}`);
+    log.info(`redownload #${job.id}: ${s.userId} (${s.plexUsername ?? "no plex"}) → ${s.target.label} [${s.problem}]${s.details ? ` ${truncate(s.details, 120)}` : ""}`);
 
     // Acknowledge first (Discord wants an answer within 3 seconds), then send the tracker.
     await i.deferUpdate();
@@ -481,7 +480,7 @@ export const redownload: ModuleFactory = (ctx) => {
         new EmbedBuilder()
           .setColor(Colors.info)
           .setTitle(u ? `🔁 Redownloads by ${u.username}` : "🔁 Recent redownloads")
-          .setDescription(truncate(jobs.map((j) => `${jobLine(j, true)}\n-# ${PROBLEMS[j.problem] ?? j.problem}: ${truncate(j.details, 90)}`).join("\n") || "None yet.", 4000)),
+          .setDescription(truncate(jobs.map((j) => `${jobLine(j, true)}\n-# ${PROBLEMS[j.problem] ?? j.problem}${j.details ? `: ${truncate(j.details, 90)}` : ""}`).join("\n") || "None yet.", 4000)),
       ],
       flags: MessageFlags.Ephemeral,
       allowedMentions: { parse: [] },
@@ -510,7 +509,7 @@ export const redownload: ModuleFactory = (ctx) => {
                 .addChoices(...Object.entries(PROBLEMS).map(([value, name]) => ({ name, value }))),
             )
             .addStringOption((o) =>
-              o.setName("details").setDescription("Describe it, e.g. 'picture freezes at 41:00'").setRequired(true).setMinLength(10).setMaxLength(300),
+              o.setName("details").setDescription("Optional: anything else, e.g. 'picture freezes at 41:00'").setMaxLength(300),
             )
             .addIntegerOption((o) => o.setName("season").setDescription("Series: season number (required for series)").setMinValue(0).setMaxValue(200))
             .addIntegerOption((o) => o.setName("episode").setDescription("Series: episode number (leave empty to replace the whole season)").setMinValue(1).setMaxValue(2000)),

@@ -68,6 +68,10 @@ export function freshState() {
     },
     /** What a search finds: episode id / movie id → release title (missing = nothing out there). */
     findable: { episodes: {}, packs: {}, movies: {} },
+    /** What an interactive search shows for a missing item (releases outside the profile carry quality rejections). */
+    fallback: { episodes: {}, seasons: {}, movies: {} },
+    tags: [],
+    tagged: [],
     monitored: [],
     commands: [],
     /** Files the next import preview reports for a downloadId (Sonarr). */
@@ -135,10 +139,16 @@ export async function startArrMock() {
 
     // grabbing
     if (r === "/release" && m === "POST") {
-      const all = [...s.releases.movie, ...s.releases.episode, ...s.releases.season];
+      const fb = [...Object.values(s.fallback.episodes), ...Object.values(s.fallback.seasons), ...Object.values(s.fallback.movies)].flat();
+      const all = [...s.releases.movie, ...s.releases.episode, ...s.releases.season, ...fb];
       const found = all.find((x) => x.guid === parsed.guid);
       if (!found) return send(404, { message: "Couldn't find requested release in cache" });
       if (s.grabFails.has(found.title)) return send(500, { message: "Download client unavailable" });
+      if (found._episodeIds || found._movieId) {
+        const ep = found._episodeIds && s.episodes.find((e) => e.id === found._episodeIds[0]);
+        grab(app, found.title, ep ?? {}, found._episodeIds ?? [found._movieId]);
+        return send(200, found);
+      }
       const downloadId = `DL${s.nextId++}`;
       const base = app === "radarr" ? { movieId: 1 } : { seriesId: 5, seasonNumber: 1 };
       s.history.push({ id: s.nextId++, eventType: "grabbed", date: new Date().toISOString(), sourceTitle: found.title, downloadId, ...base });
@@ -149,6 +159,9 @@ export async function startArrMock() {
       return send(200, found);
     }
     if (r === "/release" && m === "GET") {
+      if (app === "radarr" && s.fallback.movies[qp.movieId]) return send(200, s.fallback.movies[qp.movieId]);
+      if (app === "sonarr" && qp.episodeId && s.fallback.episodes[qp.episodeId]) return send(200, s.fallback.episodes[qp.episodeId]);
+      if (app === "sonarr" && !qp.episodeId && s.fallback.seasons[`${qp.seriesId}:${qp.seasonNumber}`]) return send(200, s.fallback.seasons[`${qp.seriesId}:${qp.seasonNumber}`]);
       if (app === "radarr") return send(200, qp.movieId === "1" ? s.releases.movie : []);
       return send(200, qp.episodeId ? s.releases.episode : s.releases.season);
     }
@@ -176,8 +189,19 @@ export async function startArrMock() {
       return send(202, {});
     }
     if (r === "/movie/editor" && m === "PUT") {
-      s.monitored.push(...parsed.movieIds.map((id) => `m${id}`));
+      if (parsed.monitored !== undefined) s.monitored.push(...parsed.movieIds.map((id) => `m${id}`));
+      if (parsed.tags) s.tagged.push({ app, movieIds: parsed.movieIds, tags: parsed.tags, applyTags: parsed.applyTags });
       return send(202, {});
+    }
+    if (r === "/series/editor" && m === "PUT") {
+      s.tagged.push({ app, seriesIds: parsed.seriesIds, tags: parsed.tags, applyTags: parsed.applyTags });
+      return send(202, {});
+    }
+    if (r === "/tag" && m === "GET") return send(200, s.tags.filter((t) => t.app === app));
+    if (r === "/tag" && m === "POST") {
+      const t = { id: s.nextId++, label: parsed.label, app };
+      s.tags.push(t);
+      return send(201, t);
     }
 
     // Radarr library

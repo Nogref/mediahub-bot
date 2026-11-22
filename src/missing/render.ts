@@ -1,6 +1,7 @@
 /** What members and admins see for a missing-content job. Members get plain words; admins get the details. */
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from "discord.js";
 import { Colors, truncate } from "../core/discord.js";
+import { friendlyQuality } from "../redownload/tracker.js";
 import type { ItemState, MissingItem, MissingJob, MissingState } from "./store.js";
 
 const t = (ms: number, style = "R") => `<t:${Math.floor(ms / 1000)}:${style}>`;
@@ -50,7 +51,8 @@ export function itemLine(it: MissingItem, jobState: MissingState): string {
       what = "downloaded, an admin needs to finish it";
       break;
   }
-  return `${ICON[it.state]} ${it.label}: ${what}`;
+  const other = it.offProfile && (it.state === "downloading" || it.state === "imported") ? ` (${friendlyQuality(it.offProfile.quality)} copy)` : "";
+  return `${ICON[it.state]} ${it.label}${other}: ${what}`;
 }
 
 function counts(j: MissingJob) {
@@ -150,13 +152,16 @@ export function logEmbed(j: MissingJob): EmbedBuilder {
         name: `${j.target.kind === "movie" ? "Movie" : "Episodes"} (${c.imported}/${c.total} on Plex)`,
         value: truncate(
           j.items
-            .map((i) => `${ICON[i.state]} ${i.label}${i.message && i.state !== "imported" ? ` · ${truncate(i.message, 80)}` : ""}`)
+            .map(
+              (i) =>
+                `${ICON[i.state]} ${i.label}${i.offProfile ? ` · 🟠 other quality: ${i.offProfile.quality}` : ""}${i.message && i.state !== "imported" ? ` · ${truncate(i.message, 80)}` : ""}`,
+            )
             .join("\n"),
           1024,
         ),
       },
     )
-    .setFooter({ text: `${j.target.app} · ${j.phase ?? "not started"} · id ${j.id}` })
+    .setFooter({ text: `${j.target.app} · ${j.phase === "fallback" ? "trying other qualities" : (j.phase ?? "not started")} · id ${j.id}` })
     .setTimestamp(new Date(j.updatedAt));
   if (j.events.length) e.addFields({ name: "Timeline", value: truncate(j.events.slice(-8).map((ev) => `${t(ev.at, "t")} ${ev.text}`).join("\n"), 1024) });
   if (j.target.posterUrl) e.setThumbnail(j.target.posterUrl);
