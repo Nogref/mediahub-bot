@@ -65,6 +65,7 @@ export function helpModule(getLines: () => HelpLine[]): ModuleFactory {
         title: "🛠️ Problems & ideas",
         entries: [
           { cmds: ["/redownload start", "/redownload status"], text: "Swap a broken file for a fresh copy yourself, and check on it" },
+          { cmds: ["/missing"], text: "Get episodes missing from a show, or a movie that never downloaded" },
           { cmds: ["/report"], text: "Tell the admins about a problem" },
           { cmds: ["/suggest"], text: "Share an idea for the server. Others can 👍 it" },
         ],

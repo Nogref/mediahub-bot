@@ -37,10 +37,10 @@ import { ACTIVE_STATES, RedownloadStore, type Job } from "../redownload/store.js
 import { Library, resolveTarget, TargetError } from "../redownload/targets.js";
 import type { CurrentFile, Release, Target } from "../redownload/types.js";
 import { plexTvFor } from "../services/plextv.js";
+import { MissingStore } from "../missing/store.js";
+import { confirmedPlex as checkPlex } from "../redownload/gate.js";
 import { ADMIN } from "./parents.js";
 
-const REVERIFY_MS = 6 * 3_600_000;
-const REVERIFY_GRACE_MS = 7 * 86_400_000;
 const BIN_CACHE_MS = 5 * 60_000;
 
 interface Session {
@@ -84,33 +84,7 @@ export const redownload: ModuleFactory = (ctx) => {
   const limits = () => cfg.redownload;
 
   // ---- gates ----------------------------------------------------------------------
-  /** Linked, and that Plex account is (still) on the share list. Re-checked every few hours. */
-  async function confirmedPlex(userId: string): Promise<{ ok: true; username: string } | { ok: false; reason: string }> {
-    if (!plexTv) return { ok: false, reason: "Redownloads need the bot connected to Plex (PLEX_URL and PLEX_TOKEN) so members can be confirmed. Ask an admin." };
-    const l = rstore.link(userId);
-    if (!l) {
-      return {
-        ok: false,
-        reason: "🔗 First, link your Plex account with `/plex`. It's a one-time sign-in so I know you're on the server.",
-      };
-    }
-    if (Date.now() - l.verifiedAt > REVERIFY_MS) {
-      try {
-        l.hasAccess = await plexTv.hasAccess(l.plexUserId);
-        rstore.setVerified(userId, l.hasAccess);
-      } catch (err) {
-        log.warn(`redownload: couldn't re-check Plex access for ${userId}: ${(err as Error).message}`);
-        if (Date.now() - l.verifiedAt > REVERIFY_GRACE_MS) return { ok: false, reason: "I couldn't reach Plex to confirm your access. Try again in a few minutes." };
-      }
-    }
-    if (!l.hasAccess) {
-      return {
-        ok: false,
-        reason: `Your linked Plex account (**${l.plexUsername}**) isn't on this server's share list any more, so redownloads are locked. Ask an admin if that's wrong.`,
-      };
-    }
-    return { ok: true, username: l.plexUsername };
-  }
+  const confirmedPlex = (userId: string) => checkPlex(rstore, plexTv, userId);
 
   async function recycleBin(app: Target["app"]): Promise<string | null> {
     const hit = bins.get(app);
@@ -444,7 +418,7 @@ export const redownload: ModuleFactory = (ctx) => {
   }
 
   // ---- admin ------------------------------------------------------------------------------
-  const ADMIN_SUB = { ...ADMIN, group: { name: "redownloads", description: "Members' redownloads: limits, bans, approvals, history" } };
+  const ADMIN_SUB = { ...ADMIN, group: { name: "redownloads", description: "Members' redownloads and /missing: pause, bans, approvals, history" } };
   const update = (fn: (s: ReturnType<typeof loadSettings>) => void) => {
     const s = loadSettings(store);
     fn(s);
@@ -491,6 +465,10 @@ export const redownload: ModuleFactory = (ctx) => {
       )
       .addFields({ name: "Apps", value: apps.join("\n") });
     if (active.length) e.addFields({ name: `Active (${active.length})`, value: truncate(active.map((j) => jobLine(j, true)).join("\n"), 1024) });
+    const searches = new MissingStore(store).active();
+    if (searches.length) {
+      e.addFields({ name: `/missing searches running (${searches.length})`, value: truncate(searches.map((j) => `🔎 **#${j.id}** ${truncate(j.target.label, 60)} · <@${j.discordUserId}> · ${j.state.replace("_", " ")}`).join("\n"), 1024) });
+    }
     if (banned.length) e.addFields({ name: `Banned (${banned.length})`, value: truncate(banned.map(([id, b]) => `<@${id}>${b.reason ? `: ${b.reason}` : ""}`).join("\n"), 1024) });
     await i.editReply({ embeds: [e], allowedMentions: { parse: [] } });
   }
@@ -543,7 +521,7 @@ export const redownload: ModuleFactory = (ctx) => {
       {
         ...ADMIN_SUB,
         name: "pause",
-        description: "Stop members starting redownloads",
+        description: "Stop members starting redownloads and /missing searches",
         build: (b) => b.addStringOption((o) => o.setName("reason").setDescription("Shown to members").setMaxLength(200)),
         execute: async (i) => {
           const reason = i.options.getString("reason") ?? undefined;
@@ -555,7 +533,7 @@ export const redownload: ModuleFactory = (ctx) => {
       {
         ...ADMIN_SUB,
         name: "resume",
-        description: "Let members start redownloads again",
+        description: "Let members use redownloads and /missing again",
         execute: async (i) => {
           update((s) => delete s.paused);
           log.info(`redownload: resumed by ${i.user.id}`);
@@ -565,7 +543,7 @@ export const redownload: ModuleFactory = (ctx) => {
       {
         ...ADMIN_SUB,
         name: "ban",
-        description: "Stop a member using redownloads",
+        description: "Stop a member using redownloads and /missing",
         build: (b) =>
           b
             .addUserOption((o) => o.setName("user").setDescription("Member").setRequired(true))
@@ -581,7 +559,7 @@ export const redownload: ModuleFactory = (ctx) => {
       {
         ...ADMIN_SUB,
         name: "unban",
-        description: "Let a member use redownloads again",
+        description: "Let a member use redownloads and /missing again",
         build: (b) => b.addUserOption((o) => o.setName("user").setDescription("Member").setRequired(true)),
         execute: async (i) => {
           const u = i.options.getUser("user", true);
@@ -593,7 +571,7 @@ export const redownload: ModuleFactory = (ctx) => {
       {
         ...ADMIN_SUB,
         name: "approvals",
-        description: "Require an admin to approve each redownload",
+        description: "Require an admin to approve each redownload and /missing search",
         build: (b) =>
           b.addStringOption((o) =>
             o

@@ -24,13 +24,21 @@ export function freshState() {
         id: 1, title: "Heat", year: 1995, tmdbId: 949, hasFile: true, images: [{ coverType: "poster", remoteUrl: "https://img.example/heat.jpg" }],
         movieFile: { id: 10, quality: q("Bluray-1080p"), size: 8e9, sceneName: "Heat.1995.1080p.BluRay.x264-OLD" },
       },
-      { id: 2, title: "Alien", year: 1979, tmdbId: 348, hasFile: false },
+      { id: 2, title: "Alien", year: 1979, tmdbId: 348, hasFile: false, monitored: true, isAvailable: true, images: [] },
+      { id: 3, title: "Future Film", year: 2027, tmdbId: 999, hasFile: false, monitored: true, isAvailable: false, digitalRelease: "2027-06-01T00:00:00Z" },
     ],
-    series: [{ id: 5, title: "The Show", year: 2020, tvdbId: 77, statistics: { episodeFileCount: 2 }, images: [] }],
+    series: [
+      { id: 5, title: "The Show", year: 2020, tvdbId: 77, statistics: { episodeFileCount: 2, episodeCount: 5 }, images: [] },
+      { id: 6, title: "Complete Show", year: 2019, tvdbId: 78, statistics: { episodeFileCount: 1, episodeCount: 1 }, images: [] },
+    ],
     episodes: [
-      { id: 501, seriesId: 5, seasonNumber: 1, episodeNumber: 1, title: "Pilot", hasFile: true, episodeFileId: 51 },
-      { id: 502, seriesId: 5, seasonNumber: 1, episodeNumber: 2, title: "Two", hasFile: true, episodeFileId: 52 },
-      { id: 503, seriesId: 5, seasonNumber: 1, episodeNumber: 3, title: "Three", hasFile: false, episodeFileId: 0 },
+      { id: 501, seriesId: 5, seasonNumber: 1, episodeNumber: 1, title: "Pilot", hasFile: true, episodeFileId: 51, airDateUtc: "2020-01-01T00:00:00Z" },
+      { id: 502, seriesId: 5, seasonNumber: 1, episodeNumber: 2, title: "Two", hasFile: true, episodeFileId: 52, airDateUtc: "2020-01-08T00:00:00Z" },
+      { id: 503, seriesId: 5, seasonNumber: 1, episodeNumber: 3, title: "Three", hasFile: false, episodeFileId: 0, airDateUtc: "2020-01-15T00:00:00Z" },
+      { id: 504, seriesId: 5, seasonNumber: 1, episodeNumber: 4, title: "TBA", hasFile: false, episodeFileId: 0, airDateUtc: "2099-01-01T00:00:00Z" },
+      { id: 601, seriesId: 5, seasonNumber: 2, episodeNumber: 1, title: "New Start", hasFile: false, episodeFileId: 0, airDateUtc: "2021-01-01T00:00:00Z" },
+      { id: 602, seriesId: 5, seasonNumber: 2, episodeNumber: 2, title: "Lost One", hasFile: false, episodeFileId: 0, airDateUtc: "2021-01-08T00:00:00Z" },
+      { id: 701, seriesId: 6, seasonNumber: 1, episodeNumber: 1, title: "Only", hasFile: true, episodeFileId: 71, airDateUtc: "2019-01-01T00:00:00Z" },
     ],
     episodeFiles: [
       { id: 51, seriesId: 5, seasonNumber: 1, quality: q("WEBDL-1080p"), size: 2e9, sceneName: "The.Show.S01.1080p-OLDPACK" },
@@ -58,6 +66,10 @@ export function freshState() {
         rel("The.Show.S01E01.1080p.WEB-A", 10, 2e9, 30),
       ],
     },
+    /** What a search finds: episode id / movie id → release title (missing = nothing out there). */
+    findable: { episodes: {}, packs: {}, movies: {} },
+    monitored: [],
+    commands: [],
     /** Files the next import preview reports for a downloadId (Sonarr). */
     preview: {},
     grabFails: new Set(),
@@ -152,7 +164,20 @@ export async function startArrMock() {
     if (r.startsWith("/history/failed/") && m === "POST") return send(200, {});
     if (r === "/command" && m === "POST") {
       if (parsed.name === "RefreshMonitoredDownloads" && s.importOnRefresh) importBlocked(app);
-      return send(201, { id: 1, name: parsed.name });
+      const id = s.nextId++;
+      s.commands.push({ id, ...parsed });
+      runSearch(app, parsed);
+      return send(201, { id, name: parsed.name, status: "queued" });
+    }
+    if (r.startsWith("/command/") && m === "GET") return send(200, { id: Number(r.split("/")[2]), status: s.commandStatus ?? "completed" });
+    if (r === "/episode/monitor" && m === "PUT") {
+      s.monitored.push(...parsed.episodeIds);
+      for (const e of s.episodes) if (parsed.episodeIds.includes(e.id)) e.monitored = parsed.monitored;
+      return send(202, {});
+    }
+    if (r === "/movie/editor" && m === "PUT") {
+      s.monitored.push(...parsed.movieIds.map((id) => `m${id}`));
+      return send(202, {});
     }
 
     // Radarr library
@@ -184,6 +209,31 @@ export async function startArrMock() {
     }
     return send(404, { message: `mock: no route ${m} ${p}` });
   });
+
+  /** What a search command does: grab whatever "findable" says is out there. */
+  function grab(app, title, base, itemIds) {
+    const downloadId = `DL${s.nextId++}`;
+    for (const itemId of itemIds) {
+      const ids = app === "radarr" ? { movieId: itemId } : { seriesId: base.seriesId, seasonNumber: base.seasonNumber, episodeId: itemId };
+      s.history.push({ id: s.nextId++, eventType: "grabbed", date: new Date().toISOString(), sourceTitle: title, downloadId, ...ids });
+      s.queue.push({ id: s.nextId++, app, downloadId, title, ...ids, trackedDownloadState: "downloading", trackedDownloadStatus: "ok", status: "downloading", statusMessages: [], size: 2e9, sizeleft: 1.5e9 });
+    }
+  }
+  function runSearch(app, cmd) {
+    const f = s.findable;
+    if (cmd.name === "MoviesSearch") for (const id of cmd.movieIds) if (f.movies[id]) grab(app, f.movies[id], {}, [id]);
+    if (cmd.name === "EpisodeSearch") {
+      for (const id of cmd.episodeIds) {
+        const ep = s.episodes.find((e) => e.id === id);
+        if (f.episodes[id]) grab(app, f.episodes[id], ep, [id]);
+      }
+    }
+    if (cmd.name === "SeasonSearch") {
+      const pack = f.packs[`${cmd.seriesId}:${cmd.seasonNumber}`];
+      const eps = s.episodes.filter((e) => e.seriesId === cmd.seriesId && e.seasonNumber === cmd.seasonNumber && !e.hasFile && e.airDateUtc < new Date().toISOString());
+      if (pack) grab(app, pack, { seriesId: cmd.seriesId, seasonNumber: cmd.seasonNumber }, eps.map((e) => e.id));
+    }
+  }
 
   /** What the app does on RefreshMonitoredDownloads: retry blocked imports now that the old file is gone. */
   function importBlocked(app) {
@@ -235,6 +285,18 @@ export async function startArrMock() {
         statusMessages: messages.length ? [{ title: "file.mkv", messages }] : [],
       });
       return item;
+    },
+    /** A missing episode / movie finishes downloading and imports. */
+    arrive(itemId, app = "sonarr") {
+      if (app === "radarr") {
+        const mv = s.movies.find((x) => x.id === itemId);
+        Object.assign(mv, { hasFile: true, movieFile: { id: s.nextId++, quality: q("Bluray-1080p"), size: 8e9 } });
+        s.queue = s.queue.filter((x) => !(x.app === "radarr" && x.movieId === itemId));
+      } else {
+        const ep = s.episodes.find((e) => e.id === itemId);
+        Object.assign(ep, { hasFile: true, episodeFileId: s.nextId++ });
+        s.queue = s.queue.filter((x) => !(x.app === "sonarr" && x.episodeId === itemId));
+      }
     },
     failDownload(title) {
       const item = s.queue.find((x) => x.title === title);

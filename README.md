@@ -20,6 +20,7 @@ Two rules shape the design:
 | `/music radio` · `queue` · `skip` · `shuffle` · `stop` | everyone | Radio mode and queue control. The now-playing card also has buttons |
 | `/aurral [username]` | everyone | Your own Aurral music account: creates it and DMs you the login (works in Subsonic apps too), or shows your login if you have one |
 | `/redownload start <title> <problem> <details> [season] [episode]` | everyone | Replace a broken movie, episode, whole season or album with a fresh copy. Shows the replacement first; you can pick a different copy |
+| `/missing [title] [season]` | everyone | Episodes that aired but aren't on Plex, or a movie that never downloaded: pick it, and the bot finds and downloads it with a live tracker. On its own, shows your searches |
 | `/redownload status` | everyone | Your live redownload tracker(s), with Refresh/Cancel buttons, and how many you have left |
 | `/suggest` | everyone | Share an idea in a short form. The bot posts it in the suggestions channel (after a family-friendly check) for others to 👍, and DMs you when an admin responds |
 | `/plex` | everyone | Link your Plex account with one sign-in, or see/unlink the one you linked (your Plex sign-in isn't kept) |
@@ -331,6 +332,18 @@ If a download fails, imports with a different problem or takes over 24 hours, it
 **The log:** one message per redownload in the log channel, edited as it goes: who (Discord + Plex username), what, the problem and description, old vs. new release and a timeline. Buttons: **Cancel** (before the swap), **Approve / Deny** (approve-first mode), **Mark resolved** (needs admin) and **Ban requester**. The apps' own "manual interaction required" / "download failed" alerts for these downloads are kept out of the admin channel, since the log already covers them.
 
 **Admin controls:** `/admin redownloads pause [reason]` / `resume`, `ban user [reason]` / `unban`, `approvals on|off` (each redownload waits for Approve; auto-denied after 24 hours), `plexcheck on|off` (require `/plex`; off by default), `history [user]`, `overview`.
+
+## Missing episodes and movies
+
+`/missing` fills gaps without an admin: a season that skipped an episode, or a movie that's been "monitored" for ages but never downloaded. Nothing is ever deleted, so there's no daily limit; each request is one season or one movie.
+
+**What members see:** they start typing a title (shows that have gaps are marked *some missing*; only movies that never downloaded are listed). For a show with gaps in several seasons, they pick the season from a menu. The card lists just the episodes that have aired but aren't on Plex (and mentions any that haven't aired yet), with **Get all** or **Choose episodes**. Then the same kind of live DM tracker as redownloads: looking → downloading (progress bar, time left) → on Plex, per episode, with Refresh and Cancel. Movies that aren't out yet, seasons with nothing missing and titles not in the library at all (use `/request`) get a friendly explanation instead.
+
+**What it does:** it marks the chosen episodes (or the movie) monitored, then asks Sonarr/Radarr to search. A season with nothing downloaded is searched as a season pack first; whatever that doesn't cover is searched episode by episode. It follows each grab through the download queue until it's imported.
+
+**When something can't be found:** the member is told plainly, and a short message goes to the redownload log (falling back to the admin channel) listing what couldn't be got and why (no release found, download disappeared, or downloaded but won't import after 30 minutes), plus where to look in Sonarr/Radarr. Members can't search the same title again for 6 hours after that; admins can.
+
+**Shared switches:** pause, bans, approve-first and the Plex check under `/admin redownloads` apply to `/missing` too, and `/admin redownloads overview` lists searches in progress. One search per season at a time; at most 10 at once server-wide.
 
 ## Suggestions, and a chat-free server
 
