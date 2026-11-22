@@ -101,6 +101,7 @@ export async function startMock() {
       }
       return send(200, state.lidarrAlbums.filter((a) => a.foreignAlbumId === fid));
     }
+    if (p === "/lidarr/api/v1/album/55" && state.lidarrAlbums.some((a) => a.id === 55)) return send(200, state.lidarrAlbums.find((a) => a.id === 55));
     if (p === "/lidarr/api/v1/album/55") return send(200, { id: 55, title: "Album One", foreignAlbumId: "rg-1", statistics: { trackFileCount: 10, trackCount: 10, totalTrackCount: 10, percentOfTracks: 100 } });
     if (p === "/lidarr/api/v1/queue/details") return send(200, url.searchParams.get("albumIds") === "56" ? [{ albumId: 56, size: 100, sizeleft: 40 }] : []);
     if (p === "/lidarr/api/v1/album/56") return send(200, { id: 56, title: "Queued Album", foreignAlbumId: "rg-56", statistics: { trackFileCount: 0, trackCount: 10, totalTrackCount: 10, percentOfTracks: 0 } });
@@ -115,7 +116,7 @@ export async function startMock() {
     if (p === "/aurral/api/library/albums/request" && m === "POST") {
       return send(201, { success: true, status: "queued", album: { id: "lib-1" }, createdArtist: true, queued: true, albumStatus: { status: "queued" } });
     }
-    if (p === "/aurral/api/library/albums/lib-1/status") return send(200, { status: "complete" });
+    if (p === "/aurral/api/library/albums/lib-1/status") return send(200, { status: state.aurralStatus ?? "complete" });
     if (p === "/aurral/api/users" && m === "GET") return send(200, state.aurralUsers);
     if (p === "/aurral/api/users" && m === "POST") {
       if (state.aurralUsers.some((u) => u.username === parsed.username.toLowerCase())) return send(409, { error: "Username already exists" });

@@ -26,6 +26,7 @@ import { randomBytes } from "node:crypto";
 import { Colors, dm, truncate, ts } from "../core/discord.js";
 import { log } from "../core/logger.js";
 import type { BotModule, ModuleFactory } from "../core/module.js";
+import { dmFallbackChannel } from "../notify/announce.js";
 import { TtlCache } from "../core/ttlCache.js";
 import { buildAdapters } from "../redownload/arr.js";
 import { RedownloadEngine } from "../redownload/engine.js";
@@ -76,7 +77,7 @@ export const redownload: ModuleFactory = (ctx) => {
 
   const rstore = new RedownloadStore(store);
   const tracker = new Tracker(client, rstore);
-  const engine = new RedownloadEngine({ adapters, rstore, notifier, client, cfg, tracker });
+  const engine = new RedownloadEngine({ adapters, rstore, notifier, client, cfg, tracker, fallbackChannel: () => dmFallbackChannel(store, cfg.channels.notify) });
   const library = new Library(adapters);
   const plexTv = plexTvFor(ctx);
   const sessions = new TtlCache<string, Session>(10 * 60_000);

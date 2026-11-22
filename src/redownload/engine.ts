@@ -35,6 +35,8 @@ const APPROVAL_EXPIRY_MS = 24 * 60 * MINUTE;
 export interface EngineDeps {
   adapters: Adapters;
   rstore: RedownloadStore;
+  /** Where to @ the member when their DMs are closed (only while announcements are on). */
+  fallbackChannel?: () => string | undefined;
   notifier: Notifier;
   client: Client;
   cfg: Config;
@@ -519,8 +521,9 @@ export class RedownloadEngine {
     const line = short[job.state];
     if (!line) return;
     const sent = await dm(this.d.client, job.discordUserId, job.trackerMessageId ? line : { embeds: [trackerEmbed(job)] });
-    if (!sent && this.d.cfg.channels.notify) {
-      const ch = await this.d.client.channels.fetch(this.d.cfg.channels.notify).catch(() => null);
+    const fallback = this.d.fallbackChannel?.();
+    if (!sent && fallback) {
+      const ch = await this.d.client.channels.fetch(fallback).catch(() => null);
       if (ch?.isSendable()) {
         const text =
           job.state === "done"

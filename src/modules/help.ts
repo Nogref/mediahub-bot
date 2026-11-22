@@ -56,8 +56,8 @@ export function helpModule(getLines: () => HelpLine[]): ModuleFactory {
       {
         title: "🎬 Get something new",
         entries: [
-          { cmds: ["/request movie", "/request series", "/request album"], text: "Ask for it and it downloads automatically" },
-          { cmds: ["/requests"], text: "What you've asked for, and what's arrived" },
+          { cmds: ["/request movie", "/request series", "/request album"], text: "Ask for it, and I'll DM you as it downloads" },
+          { cmds: ["/requests"], text: "How your requests are going, and what's arrived" },
           { cmds: ["/random movie"], text: "Can't decide? Get a pick from the library" },
         ],
       },
@@ -88,7 +88,7 @@ export function helpModule(getLines: () => HelpLine[]): ModuleFactory {
           { cmds: ["/status"], text: "Is everything working right now?" },
           { cmds: ["/stats"], text: "How big the library is, and other fun numbers" },
           { cmds: ["/plezy"], text: "The better Plex app, and how to get it" },
-          { cmds: ["/pings"], text: "Choose which announcements @-ping you" },
+          { cmds: ["/pings"], text: "Choose what the bot @-pings you about" },
           // Only worth mentioning when redownloads need it.
           { cmds: ["/plex"], text: "Link your Plex account (needed for redownloads)", hidden: !loadSettings(store).requirePlex },
         ],

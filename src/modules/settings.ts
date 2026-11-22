@@ -7,6 +7,7 @@ import { ChannelType, EmbedBuilder, MessageFlags, type ChatInputCommandInteracti
 import { Colors } from "../core/discord.js";
 import { LiveMessage } from "../core/liveMessage.js";
 import type { ModuleFactory, SubcommandDef } from "../core/module.js";
+import { announcementsOn } from "../notify/announce.js";
 import { OPT_CATEGORIES } from "../core/roles.js";
 import { setChannel, setLink, type ChannelKey, type LinkKey } from "../core/settings.js";
 
@@ -103,9 +104,10 @@ export const settings: ModuleFactory = ({ cfg, store, client, roles, bus }) => {
         { name: "Links", value: LINKS.map((l) => `${l.label}: ${cfg.links[l.key] ?? "*not set*"}`).join("\n") },
         { name: "Posts and boards", value: live.join("\n") },
         { name: "Ping roles", value: OPT_CATEGORIES.map((c) => `${c.emoji} ${c.name}: ${roles.get(c.key) ? `<@&${roles.get(c.key)}>` : "*not created yet*"}`).join("\n") },
+        { name: "Announcements", value: announcementsOn(store) ? "📣 On: new movies, shows and albums are posted publicly" : "🔕 Off: requests are DMed only (`/setup announcements`)" },
         { name: "Commands-only channels", value: Object.keys(commandsOnlyChannels(store)).map((id) => `<#${id}>`).join(", ") || "*none* (`/setup commands-only`)" },
       )
-      .setFooter({ text: "Change with /setup channels, /setup links, /setup welcome, /setup plezy, /setup stats, /setup nowplaying, /setup help, /setup commands-only" });
+      .setFooter({ text: "Change with /setup channels, /setup links, /setup welcome, /setup plezy, /setup stats, /setup nowplaying, /setup help, /setup commands-only, /setup announcements" });
     await i.reply({ embeds: [e], flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
   }
 

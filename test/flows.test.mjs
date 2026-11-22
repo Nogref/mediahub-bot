@@ -13,6 +13,11 @@ import { setDefaultTimeout } from "../dist/core/http.js";
 import { RoleDirectory } from "../dist/core/roles.js";
 import { Access } from "../dist/core/access.js";
 import { EventEmitter } from "node:events";
+import { setAnnouncements } from "../dist/notify/announce.js";
+
+/** Lets the request tracker (started via the bus) finish its first check. */
+const settle = (ms = 150) => new Promise((r) => setTimeout(r, ms));
+const JARGON = /Seerr|Radarr|Sonarr|Lidarr|Aurral|MusicBrainz|indexer|monitored/i;
 
 let mock;
 before(async () => {
@@ -76,7 +81,7 @@ test("command set: everything registers, gates set, admin-only commands hidden f
     "/music play", "/music queue", "/music radio", "/music shuffle", "/music skip", "/music stop",
     "/pings", "/plex", "/plezy", "/random movie", "/redownload start", "/redownload status", "/report",
     "/request album", "/request movie", "/request series", "/requests",
-    "/setup channels", "/setup commands-only", "/setup edit", "/setup help", "/setup links", "/setup nowplaying", "/setup pings", "/setup plezy", "/setup reset", "/setup show",
+    "/setup announcements", "/setup channels", "/setup commands-only", "/setup edit", "/setup help", "/setup links", "/setup nowplaying", "/setup pings", "/setup plezy", "/setup reset", "/setup show",
     "/setup stats", "/setup statusboard", "/setup welcome",
     "/stats", "/status", "/suggest",
   ].sort());
@@ -101,7 +106,7 @@ test("missing services drop their commands", () => {
   assert.deepEqual(usages, [
     "/admin suggestions review", "/admin suggestions top",
     "/help", "/pings", "/plezy", "/report", "/request movie", "/request series", "/requests",
-    "/setup channels", "/setup commands-only", "/setup edit", "/setup help", "/setup links", "/setup pings", "/setup plezy", "/setup reset", "/setup show", "/setup stats", "/setup statusboard", "/setup welcome",
+    "/setup announcements", "/setup channels", "/setup commands-only", "/setup edit", "/setup help", "/setup links", "/setup pings", "/setup plezy", "/setup reset", "/setup show", "/setup stats", "/setup statusboard", "/setup welcome",
     "/stats", "/status", "/suggest",
   ]);
 });
@@ -128,8 +133,8 @@ test("/help: short, grouped, plain-language; admin and inviter sections only for
   assert.ok(JSON.stringify(admin).length < 3000, "fits on a phone screen or two");
 });
 
-test("/request movie: search → buttons → request attributed to mapped Seerr user", async () => {
-  const { registry, store } = setup();
+test("/request movie: search → buttons → request attributed to mapped Seerr user, tracker DMed", async () => {
+  const { registry, store, client } = setup();
   const i = await slash(registry, "request", "movie", { query: "matrix" });
   const reply = i.last();
   assert.equal(reply.embeds.length, 3, "persons and tv filtered out");
@@ -143,9 +148,17 @@ test("/request movie: search → buttons → request attributed to mapped Seerr 
   const post = mock.calls.find((x) => x.method === "POST" && x.path === "/seerr/api/v1/request");
   assert.deepEqual(post.body, { mediaType: "movie", mediaId: 603, userId: 2 });
   assert.equal(post.headers["x-api-key"], "k");
-  const done = json(c.last().embeds[0]);
-  assert.match(done.title, /Requested: The Matrix \(1999\)/);
-  assert.match(done.description, /Approved\. Radarr will pick it up/);
+  await settle();
+  const tracked = c.last();
+  assert.match(tracked.content, /Requested! I've sent you a DM/);
+  const card = json(tracked.embeds[0]);
+  assert.match(card.title, /🎬 The Matrix \(1999\)/);
+  assert.match(card.description, /✅ Requested\n▶️ Finding a copy…/);
+  assert.doesNotMatch(JSON.stringify(tracked), JARGON);
+  const dm = client.dms.find((d) => d.to === "u1");
+  assert.match(json(dm.payload.embeds[0]).title, /The Matrix \(1999\)/);
+  assert.deepEqual(dm.payload.components[0].toJSON().components.map((b) => b.custom_id), [`rqt:refresh:${store.pendingRequests()[0].id}`]);
+  assert.equal(client.sent.length, 0, "nothing posted in announcements");
   const [row] = store.pendingRequests();
   assert.equal(row.tmdbId, 603);
   assert.equal(row.seerrRequestId, 77);
@@ -155,7 +168,9 @@ test("/request movie: search → buttons → request attributed to mapped Seerr 
 test("/request movie on an already-requested title follows it instead of failing", async () => {
   const { registry, store } = setup();
   const c = await click(registry, "seerr:movie:605", { userId: "u2" });
-  assert.match(json(c.last().embeds[0]).title, /Already requested/);
+  await settle();
+  assert.match(c.last().content, /Someone else asked for it first/);
+  assert.match(json(c.last().embeds[0]).title, /The Matrix Revolutions/);
   const row = store.pendingRequests().find((r) => r.discordUserId === "u2");
   assert.equal(row.seerrRequestId, 90);
 });
@@ -179,26 +194,34 @@ test("/request album via Lidarr: adds artist with defaults, waits for album, mon
   assert.deepEqual(monitor.body, { albumIds: [55], monitored: true });
   const cmd = mock.calls.find((x) => x.path === "/lidarr/api/v1/command");
   assert.deepEqual(cmd.body, { name: "AlbumSearch", albumIds: [55] });
+  await settle();
+  assert.match(c.last().content, /Requested! I've sent you a DM/);
   const done = json(c.last().embeds[0]);
-  assert.match(done.title, /Requested: Album One — Artist A/);
-  assert.match(done.description, /Added artist \*\*Artist A\*\*/);
+  assert.match(done.title, /💿 Album One by Artist A/);
+  assert.match(done.description, /Finding a copy/);
+  assert.doesNotMatch(JSON.stringify(c.last()), JARGON);
   const row = store.pendingRequests()[0];
   assert.equal(row.lidarrAlbumId, 55);
   assert.equal(row.target, "lidarr");
 });
 
 test("/request album falls back to Aurral when Lidarr is unreachable", async () => {
+  mock.state.aurralStatus = "downloading";
   const { registry, store } = setup({ lidarr: { url: "http://127.0.0.1:9", apiKey: "k" } });
   const i = await slash(registry, "request", "album", { query: "anything" });
   const reply = i.last();
-  assert.match(reply.content, /Lidarr isn't reachable right now, so I searched Aurral instead/);
+  assert.doesNotMatch(reply.content, JARGON, "members aren't told which music app answered");
   const id = reply.components[0].toJSON().components[0].custom_id;
   const c = await click(registry, id);
   const req = mock.calls.find((x) => x.method === "POST" && x.path === "/aurral/api/library/albums/request");
   assert.deepEqual(req.body, { albumMbid: "rg-9", albumName: "Aurral Album", artistMbid: "ar-9", artistName: "Band B" });
+  await settle();
   const done = json(c.last().embeds[0]);
-  assert.equal(done.footer.text, "via Aurral");
+  assert.match(done.description, /✅ Found a copy\n▶️ Starting the download…/);
+  assert.doesNotMatch(`${c.last().content} ${done.description}`, JARGON, "the album itself is called \"Aurral Album\" in the mock");
   assert.equal(store.pendingRequests()[0].aurralAlbumId, "lib-1");
+  assert.equal(store.pendingRequests()[0].target, "aurral");
+  mock.state.aurralStatus = undefined;
 });
 
 test("a stale music button explains itself", async () => {
@@ -316,6 +339,7 @@ test("webhook server: secret enforced, unknown service 404, events reach the not
   assert.equal(health.status, 200);
   assert.deepEqual((await health.json()).commands, { ok: false, error: "Missing Access", hint: "re-invite" });
 
+  setAnnouncements(store, true);
   await notifier.flush("c-notify");
   assert.match(json(client.sent.at(-1).payload.embeds[0]).title, /Heat \(1995\)/);
   notifier.stop();
@@ -323,22 +347,24 @@ test("webhook server: secret enforced, unknown service 404, events reach the not
   store.close();
 });
 
-test("request tracker pings requesters when a webhook was missed", async () => {
-  const { store, client, notifier, services, cfg } = setup();
-  const { checkPendingRequests } = await import("../dist/modules/requestTracker.js");
-  store.addRequest({ discordUserId: "u1", kind: "movie", target: "seerr", title: "The Matrix", year: 1999, tmdbId: 603, seerrRequestId: 77 });
-  store.addRequest({ discordUserId: "u2", kind: "album", target: "lidarr", title: "Album One", artistName: "Artist A", mbAlbumId: "rg-1", lidarrAlbumId: 55 });
-  store.addRequest({ discordUserId: "u3", kind: "album", target: "aurral", title: "Aurral Album", artistName: "Band B", aurralAlbumId: "lib-1" });
-  const n = await checkPendingRequests({ store, client, notifier, services, cfg });
-  assert.equal(n, 3);
-  await notifier.flush("c-notify");
-  const msg = client.sent.at(-1).payload;
-  assert.match(msg.content, /<@u1> — \*\*The Matrix \(1999\)\*\* is ready on Plex/);
-  assert.match(msg.content, /<@u2> — \*\*Album One — Artist A\*\* is ready to stream/);
-  assert.match(msg.content, /<@u3>/);
-  assert.deepEqual(msg.allowedMentions.users.sort(), ["u1", "u2", "u3"]);
-  assert.equal(store.pendingRequests().length, 0);
-  notifier.stop();
+test("requests already waiting get a tracker; ones already there just finish quietly", async () => {
+  mock.state.aurralStatus = "complete";
+  const { store, client, modules } = setup();
+  const { backfillGap } = await import("../dist/modules/requestTracker.js");
+  backfillGap.ms = 0;
+  store.addRequest({ discordUserId: "u1", kind: "album", target: "aurral", title: "Aurral Album", artistName: "Band B", aurralAlbumId: "lib-1" });
+  store.addRequest({ discordUserId: "u2", kind: "album", target: "lidarr", title: "Queued Album", artistName: "Band", lidarrAlbumId: 56 });
+  const tracker = modules.find((m) => m.name === "request-tracker");
+  await tracker.backfillPending();
+  const dm = client.dms.find((d) => d.to === "u2");
+  assert.match(dm.payload.content, /something you asked for earlier/);
+  assert.match(json(dm.payload.embeds[0]).description, /Downloading {2}▰{6}▱{4} 60%/);
+  assert.ok(!client.dms.some((d) => d.to === "u1"), "already in the library: no DM");
+  assert.equal(store.requestsForUser("u1").done.length, 1, "and it's marked done");
+  assert.equal(client.sent.length, 0, "no announcements");
+  // Running it again doesn't send a second tracker.
+  await tracker.backfillPending();
+  assert.equal(client.dms.filter((d) => d.to === "u2").length, 1);
 });
 
 test("inviters: forced single-use + 7-day expiry, max 3 active, only their own invites", async () => {
@@ -389,10 +415,11 @@ test("/requests shows live progress from Seerr and Lidarr", async () => {
   const id = store.addRequest({ discordUserId: "u9", kind: "movie", target: "seerr", title: "Old One", tmdbId: 1 });
   store.markNotified([id]);
   const i = await slash(registry, "requests", null, {}, { userId: "u9" });
+  assert.match(i.last().content, /\*\*On the way \(2\)\*\*/);
   const d = json(i.last().embeds[0]).description;
-  assert.match(d, /\*\*On the way \(2\)\*\*/);
   assert.match(d, /Dune\*\* \(2021\)\n⬇️ Downloading 75% · done <t:\d+:R>/);
-  assert.match(d, /Queued Album\*\* — Band\n⬇️ Downloading 60%/);
+  assert.match(d, /Queued Album\*\* by Band\n⬇️ Downloading 60%/);
+  assert.doesNotMatch(JSON.stringify(i.last()), JARGON);
   assert.match(d, /\*\*Landed recently\*\*\n🎬 \*\*Old One\*\*/);
   const empty = await slash(registry, "requests", null, {}, { userId: "nobody" });
   assert.match(empty.last().content, /haven't requested anything/);
@@ -435,6 +462,12 @@ test("pings: welcome setup creates roles, buttons toggle them, announcements pin
     await registry.handle(b);
     return b;
   };
+
+  // Announcements are off by default: only Server status pings are offered.
+  const off = await run("pings", undefined, {}, { userId: "m1" });
+  assert.deepEqual(off.last().components[0].toJSON().components.map((b) => b.custom_id), ["optin:status:e"]);
+  const a = await run("setup", "announcements", { mode: "on" }, { roles: ["admin-role"] });
+  assert.match(a.last().content, /Announcements are \*\*on\*\*/);
 
   const w = await run("setup", "welcome", { channel: { id: "c-welcome" } }, { roles: ["admin-role"] });
   assert.match(w.last().content, /Welcome post posted in <#c-welcome>/);

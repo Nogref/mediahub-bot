@@ -3,6 +3,7 @@
  *
  * No approval queue, no quotas: Seerr auto-approves everything the bot sends
  * (the API key acts as Seerr's admin), and Radarr/Sonarr take it from there.
+ * The member gets a live tracker by DM (src/requests).
  */
 import {
   ActionRowBuilder,
@@ -37,7 +38,7 @@ export function seerrStatus(mi: SeerrMediaInfo | undefined): StatusInfo {
     case MediaStatus.PROCESSING:
       return { label: "⏳ Already requested — on its way", color: Colors.info, requestable: true, alreadyRequested: true };
     case MediaStatus.BLOCKLISTED:
-      return { label: "🚫 Blocklisted in Seerr", color: Colors.muted, requestable: false, alreadyRequested: false };
+      return { label: "🚫 Can't be requested", color: Colors.muted, requestable: false, alreadyRequested: false };
     default:
       return { label: "➕ Not requested yet", color: Colors.muted, requestable: true, alreadyRequested: false };
   }
@@ -46,7 +47,7 @@ export function seerrStatus(mi: SeerrMediaInfo | undefined): StatusInfo {
 const titleOf = (r: { title?: string; name?: string }) => r.title ?? r.name ?? "Untitled";
 const yearFor = (r: { releaseDate?: string; firstAirDate?: string }) => yearOf(r.releaseDate ?? r.firstAirDate);
 
-export const mediaRequests: ModuleFactory = ({ services, store, cfg }) => {
+export const mediaRequests: ModuleFactory = ({ services, store, bus }) => {
   const seerr = services.seerr;
   if (!seerr) return null;
 
@@ -97,7 +98,7 @@ export const mediaRequests: ModuleFactory = ({ services, store, cfg }) => {
     const [, type, idRaw] = i.customId.split(":") as [string, SeerrMediaType, string];
     const tmdbId = Number(idRaw);
     await i.deferUpdate();
-    await i.editReply({ content: "⏳ Sending your request to Seerr…", embeds: [], components: [] });
+    await i.editReply({ content: "⏳ Sending your request…", embeds: [], components: [] });
 
     const details = await seerr!.details(type, tmdbId);
     const title = titleOf(details);
@@ -106,7 +107,6 @@ export const mediaRequests: ModuleFactory = ({ services, store, cfg }) => {
     const poster = posterUrl(details.posterPath);
     const tvdbId = details.externalIds?.tvdbId;
     const status = details.mediaInfo?.status;
-    const where = cfg.channels.notify ? ` in <#${cfg.channels.notify}>` : "";
 
     const card = (color: number, heading: string, body: string) => {
       const e = new EmbedBuilder().setColor(color).setTitle(truncate(`${heading}: ${label}`, 256)).setDescription(body);
@@ -129,6 +129,14 @@ export const mediaRequests: ModuleFactory = ({ services, store, cfg }) => {
         posterUrl: poster,
       });
 
+    /** Hands over to the live tracker (DM + this reply). */
+    const tracked = async (id: number, note?: string, fallback?: EmbedBuilder, madeSeerrRequest?: number) => {
+      await i.editReply({ content: "✅ Requested! Setting up your tracker…", embeds: [], components: [] });
+      if (!bus.emit("request-created", { id, reply: i, note, madeSeerrRequest })) {
+        await i.editReply({ content: "", embeds: [fallback ?? card(Colors.ok, "📨 Requested", "It's on its way. `/requests` shows how it's going.")] });
+      }
+    };
+
     if (status === MediaStatus.AVAILABLE) {
       await i.editReply({ content: "", embeds: [card(Colors.ok, "✅ Already in the library", "It's on Plex right now. Enjoy!")] });
       return;
@@ -138,35 +146,25 @@ export const mediaRequests: ModuleFactory = ({ services, store, cfg }) => {
     const outcome = await seerr!.createRequest({ mediaType: type, mediaId: tmdbId, tvdbId, userId });
 
     switch (outcome.kind) {
-      case "created": {
-        follow(outcome.request.id);
-        const pendingApproval = outcome.request.status === 1;
-        const lines = [
-          pendingApproval
-            ? "Seerr saved it but marked it **pending approval**. Check that Seerr's auto-approve is on."
-            : `Approved. ${type === "movie" ? "Radarr" : "Sonarr"} will pick it up automatically.`,
-          `I'll @ you${where} when it's on Plex.`,
-          userId ? "" : "\n*Tip: add your Discord user ID in Seerr → Profile → Settings → Notifications to have requests show under your name.*",
-        ].filter(Boolean);
-        await i.editReply({ content: "", embeds: [card(pendingApproval ? Colors.warn : Colors.ok, "📨 Requested", lines.join("\n"))] });
+      case "created":
+        await tracked(follow(outcome.request.id), undefined, undefined, outcome.request.id);
         return;
-      }
       case "duplicate":
-        follow(details.mediaInfo?.requests?.[0]?.id);
-        await i.editReply({
-          content: "",
-          embeds: [card(Colors.info, "⏳ Already requested", `Someone already asked for this and it's on its way. I'll @ you${where} too when it lands.`)],
-        });
+        await tracked(follow(details.mediaInfo?.requests?.[0]?.id), "Someone else asked for it first, so it's already on its way.");
         return;
       case "nothing-left":
-        if (status !== undefined && status !== MediaStatus.UNKNOWN) follow(details.mediaInfo?.requests?.[0]?.id);
-        await i.editReply({
-          content: "",
-          embeds: [card(Colors.info, "✅ Nothing left to request", "Every season is already in the library or already requested.")],
-        });
+        if (status !== undefined && status !== MediaStatus.UNKNOWN) {
+          await tracked(
+            follow(details.mediaInfo?.requests?.[0]?.id),
+            "Everything that's out is already here or on its way.",
+            card(Colors.info, "✅ Nothing left to request", "Everything that's out is already here or on its way."),
+          );
+          return;
+        }
+        await i.editReply({ content: "", embeds: [card(Colors.info, "✅ Nothing left to request", "Everything that's out is already here or on its way.")] });
         return;
       case "refused":
-        await i.editReply({ content: "", embeds: [card(Colors.bad, "🚫 Seerr refused the request", truncate(outcome.message, 500))] });
+        await i.editReply({ content: "", embeds: [card(Colors.bad, "🚫 Couldn't request this", truncate(outcome.message, 500) || "Please try again later, or ask an admin.")] });
         return;
     }
   }
@@ -177,14 +175,14 @@ export const mediaRequests: ModuleFactory = ({ services, store, cfg }) => {
       {
         ...PARENT,
         name: "movie",
-        description: "Ask for a movie. It downloads automatically",
+        description: "Ask for a movie. I'll DM you as it downloads",
         build: (b) => b.addStringOption((o) => o.setName("query").setDescription("Movie title, optionally with year").setRequired(true).setMaxLength(100)),
         execute: (i) => search(i, "movie"),
       },
       {
         ...PARENT,
         name: "series",
-        description: "Ask for a TV show. It downloads automatically",
+        description: "Ask for a TV show. I'll DM you as it downloads",
         build: (b) => b.addStringOption((o) => o.setName("query").setDescription("Series title").setRequired(true).setMaxLength(100)),
         execute: (i) => search(i, "tv"),
       },

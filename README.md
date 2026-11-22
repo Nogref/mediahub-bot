@@ -1,6 +1,6 @@
 # MediaHub bot
 
-A self-hosted Discord bot for a Plex + Seerr + Radarr/Sonarr + Tautulli + Lidarr/Aurral + Wizarr stack. Friends request movies, shows and albums from Discord, get @-mentioned when their request is ready, report broken files or replace them themselves, and pick which announcements ping them. They can also play your music library in a voice channel. Admins get a live status board, and admins and trusted "Inviters" hand out Wizarr invites.
+A self-hosted Discord bot for a Plex + Seerr + Radarr/Sonarr + Tautulli + Lidarr/Aurral + Wizarr stack. Friends request movies, shows and albums from Discord, get a live tracker in their DMs that shows how each request is going (and a message when it's ready), report broken files or replace them themselves, and pick what pings them. They can also play your music library in a voice channel. Admins get a live status board, and admins and trusted "Inviters" hand out Wizarr invites.
 
 Two rules shape the design:
 
@@ -14,7 +14,7 @@ Two rules shape the design:
 | `/request movie <query>` | everyone | Search Seerr, pick a result, and it's requested and auto-approved (Radarr takes over) |
 | `/request series <query>` | everyone | Same for TV (all seasons; Sonarr takes over) |
 | `/request album <query>` | everyone | Search Lidarr, then add the artist if needed, monitor the album and start a search. Falls back to Aurral |
-| `/requests` | everyone | Your requests: live download progress for what's on its way, and what landed recently |
+| `/requests` | everyone | Your requests: the live tracker for each one on its way, and what landed recently |
 | `/report <title> <problem> <details>` | everyone | Files a Seerr issue (video, audio, subtitles…) and DMs you when it's marked fixed |
 | `/music play <song/album/artist/playlist>` | everyone | Plays the library in your voice channel (autocomplete; `next:` puts it at the front) |
 | `/music radio` · `queue` · `skip` · `shuffle` · `stop` | everyone | Radio mode and queue control. The now-playing card also has buttons |
@@ -25,11 +25,12 @@ Two rules shape the design:
 | `/suggest` | everyone | Share an idea in a short form. The bot posts it in the suggestions channel (after a family-friendly check) for others to 👍, and DMs you when an admin responds |
 | `/plex` | everyone | Link your Plex account with one sign-in, or see/unlink the one you linked (your Plex sign-in isn't kept) |
 | `/plezy` | everyone | Posts the Plezy guide **publicly** in the current channel (for "how do I watch?" questions) |
-| `/pings` | everyone | Choose which announcements @-ping you (Movies, TV, Music, Server status) |
+| `/pings` | everyone | Choose what the bot @-pings you about (Server status; plus Movies, TV and Music while announcements are on) |
 | `/status` · `/stats` · `/random movie` · `/help` | everyone | Service check, library numbers, a random movie, a short guide to the bot |
 | `/invite create [user] [name] [expiry] [uses]` | 🎟️ inviter | Creates a Wizarr invite. With `user:@someone`, the bot DMs them the link |
 | `/invite list` · `/invite revoke` | 🎟️ inviter | Active invites (inviters see their own, admins all) and revoking them |
 | `/invite aurral user:@x` | 🎟️ inviter | Makes an Aurral account for someone and DMs them the login |
+| `/setup announcements mode:on\|off` | 🔒 admin | Post "new on Plex" announcements publicly, or not (**off** by default). Requesters get DMs either way |
 | `/setup welcome` · `plezy` · `stats` · `nowplaying` · `pings` · `statusboard` | 🔒 admin | Posts (or moves) the welcome post, Plezy guide, stats board, now-playing board, ping panel or status board (`statusboard fresh:True` posts a new one) |
 | `/setup edit post:…` · `/setup reset post:…` | 🔒 admin | Edit the welcome post or Plezy guide in a form; or restore the built-in text |
 | `/setup help channel:#x` · `remove:True` | 🔒 admin | Posts the commands guide (what every member can use) as a message that stays, like the welcome post, and updates itself when commands change |
@@ -159,7 +160,9 @@ http://mediahub-bot:8787/webhook/<service>?secret=<WEBHOOK_SECRET>
 
 `<service>` is one of `seerr`, `tautulli`, `radarr`, `sonarr`, `lidarr` or `aurral`. Instead of `?secret=`, a sender can present the secret as an `X-Webhook-Secret: …` or `Authorization: Bearer …` header. Every setup below has a **Test** button. A test shows up as a small "webhook connected" notice in the admin channel.
 
-Events are batched: everything that arrives within `NOTIFY_BATCH_SECONDS` (60 s) becomes **one message per channel**. One item gets a full card with its poster. Several get a single summary ("🆕 7 new additions", grouped into Movies / TV / Music, with episode runs collapsed to `S02E01–E05`). The same title reported by several apps, say Radarr and then Seerr and then Tautulli, is announced once. **Playback events are never posted.**
+**Public announcements are off by default.** With them off, webhooks still feed the admin notices and make request trackers update straight away, but nothing new is posted in the announcements channel. Turn them on with `/setup announcements mode:on`.
+
+When they're on, events are batched: everything that arrives within `NOTIFY_BATCH_SECONDS` (60 s) becomes **one message per channel**. One item gets a full card with its poster. Several get a single summary ("🆕 7 new additions", grouped into Movies / TV / Music, with episode runs collapsed to `S02E01–E05`). The same title reported by several apps, say Radarr and then Seerr and then Tautulli, is announced once. **Playback events are never posted.**
 
 ### Seerr (recommended: the most reliable "it's on Plex" signal)
 
@@ -206,13 +209,13 @@ Settings → Connect → **+ → Webhook**: URL `http://mediahub-bot:8787/webhoo
 - **On File Import** (older versions call it *On Import* / *On Download*). Upgrades are skipped.
 - **On Health Issue**, **On Health Restored** and **On Manual Interaction Required** go to the admin channel.
 
-Imports are announced, but they don't @-mention the requester, because a file on disk isn't necessarily on Plex yet. The ping comes from Seerr, Tautulli or the request tracker once Plex has the item. If you already use the Seerr or Tautulli webhooks you can skip these, unless you want the faster announcement or the health alerts.
+Imports make the requester's tracker check straight away (and are announced, if announcements are on). If you already use the Seerr or Tautulli webhooks you can skip these, unless you want faster tracker updates or the health alerts.
 
 ### Lidarr
 
 Settings → Connect → **+ → Webhook**: URL `http://mediahub-bot:8787/webhook/lidarr?secret=…`, Method **POST**. Turn on:
 
-- **On Release Import**. This announces the album and pings whoever requested it, because Aurral and Navidrome index the same music folder.
+- **On Release Import**. This updates the requester's tracker straight away (and announces the album, if announcements are on), because Aurral and Navidrome index the same music folder.
 - Optionally **On Health Issue**, **On Health Restored**, **On Download Failure** and **On Import Failure**, which go to the admin channel.
 
 ### Aurral
@@ -233,13 +236,26 @@ Wizarr doesn't post to the bot. The bot calls Wizarr's REST API with `WIZARR_URL
 
 ---
 
-## How the "@ you when it's ready" ping works
+## Request trackers: how members hear about their requests
 
-- When someone uses `/request`, the bot records it, including when the title was *already requested* by someone else; that person gets pinged too.
-- A ping goes to `NOTIFY_CHANNEL_ID` when a **confirming** event arrives. These are: Seerr *Media Available*, Tautulli *Recently Added* for a movie, show, season or album, Lidarr *Release Import*, and Aurral *Request available*. Single episodes never count as a finished series request.
-- **Safety net:** every `REQUEST_RECONCILE_MINUTES` (10), the bot asks Seerr, Lidarr or Aurral directly whether pending requests are now available. That catches webhooks you never set up and ones that fired while the bot was down. Webhooks are just the fast path.
-- After `REQUEST_TRACK_DAYS` (30) the bot stops waiting.
-- To make requests show under each person's own name in Seerr, they add their Discord user ID in Seerr → Profile → Settings → Notifications. Requests are auto-approved either way.
+Nothing about a request is posted publicly. Whoever asked gets a **live tracker card in their DMs** that updates itself, with a **Refresh** button:
+
+- **Movies and albums:** requested → finding a copy → downloading (progress bar and time left) → on Plex / in the music library.
+- **TV shows:** one line per requested season, e.g. *Season 1: 8 of 10 on Plex ▰▰▰▰▰▰▰▰▱▱ · Season 2: ⬇️ 3 downloading*, plus seasons that haven't started yet with their date. It's done when every episode that has aired is on Plex; episodes still to air show up as they come out.
+- **Not out yet** (a movie that isn't out to watch at home, a season that hasn't started): the card shows the expected date and the bot checks every few hours.
+- **Waiting for approval** (requests made on the Seerr website when Seerr needs approval): the card says so. Declined requests end with a DM.
+- When it's ready, the card turns green and they get a **short new DM** so their phone buzzes. The cards never mention Radarr, Sonarr, Seerr, Lidarr or Aurral.
+- **Stalled:** if nothing has happened for 24 hours after it's out (no copy found, or a download stuck), the member gets a DM saying the admins know, and the admin log (`/setup channels redownload_log:#…`, or the admin channel) gets a note with what's missing and which app to check. The bot keeps watching.
+- After `REQUEST_TRACK_DAYS` (30) it stops watching and tells both sides. For things that weren't out yet, the 30 days start on release day.
+- **DMs closed:** the reply where they made the request keeps updating for 15 minutes, and `/requests` shows the same cards anytime. If announcements are on, the "it's ready" message falls back to an @ in the announcements channel.
+
+Where trackers come from:
+
+- **`/request`** in Discord, including titles someone else already asked for.
+- **The Seerr website or app:** every `REQUEST_RECONCILE_MINUTES` (10) the bot looks for new Seerr requests and sends a tracker to whoever made them, as long as they've added their Discord user ID in Seerr → Profile → Settings → Notifications. On the first check it also picks up their requests from the last 30 days that haven't arrived yet. `0` turns this off.
+- **Requests from before this update** that hadn't arrived yet get a tracker once, shortly after the bot starts.
+
+With `RADARR_*` and `SONARR_*` set, trackers show exact per-episode counts and download progress. Without them, they fall back to Seerr's view (per-season status and Seerr's download progress). Webhooks (Seerr, Tautulli, Radarr, Sonarr, Lidarr, Aurral) make a tracker check straight away instead of on its next pass.
 
 ## Status board
 
@@ -263,7 +279,7 @@ The bot only creates, lists and revokes invite links. Your friend opens the link
 
 ## Ping settings
 
-Four roles decide who gets @-pinged. They don't lock anything: requests, music and Aurral are open to everyone regardless.
+Four roles decide who gets @-pinged. They don't lock anything: requests, music and Aurral are open to everyone regardless. **Movies, TV and Music only appear while announcements are on** (`/setup announcements`); with them off, members can only pick Server status.
 
 | Role | Pings you for |
 |---|---|
@@ -274,7 +290,7 @@ Four roles decide who gets @-pinged. They don't lock anything: requests, music a
 
 Members change theirs with the **🔔 Ping settings** button on the welcome post, or `/pings`. Either way they get private toggle buttons showing what's on. The bot creates the roles the first time they're needed, reusing roles with the same names or ones set via `ROLE_*_ID`. They're created mentionable so the bot can ping them without the "Mention Everyone" permission. `/setup pings channel:#…` posts a standalone panel if you want one outside the welcome post.
 
-Opting out means *no pings*; the announcements stay visible. Requests you make yourself always ping you when they're ready. To keep album announcements out of the main channel, set a separate music channel with `/setup channels music_announcements:#…`.
+Opting out means *no pings*; the announcements stay visible. Requests you make yourself always come to you by DM. To keep album announcements out of the main channel, set a separate music channel with `/setup channels music_announcements:#…`.
 
 ## Posts and boards
 
@@ -300,8 +316,8 @@ Aurral has no invite links, but its admin API can create users, so the bot does 
 
 ## `/requests` and `/report`
 
-- **`/requests`** lists what you've asked for through the bot. For items still on the way it shows live progress: Seerr's Radarr/Sonarr download percentage and ETA, Lidarr's queue and track count, or Aurral's download state. After 3 days with nothing found it says so, instead of leaving you guessing. Below that are items that landed in the last two weeks.
-- **`/report`** autocompletes titles that are in the library, takes a problem type (video, audio, subtitles, other), a description and an optional season/episode, and files a **Seerr issue** under your Seerr user if your Discord ID is linked there. Admins see it in the admin channel and handle it in Seerr as usual. When it's marked **resolved**, the reporter gets a DM, either straight away via Seerr's *Issue Resolved* webhook or within `REQUEST_RECONCILE_MINUTES` from the bot's own check. If their DMs are closed, they get a mention in the announcements channel instead.
+- **`/requests`** shows the live tracker card for your newest requests still on the way, a line each for the rest, and what landed in the last two weeks.
+- **`/report`** autocompletes titles that are in the library, takes a problem type (video, audio, subtitles, other), a description and an optional season/episode, and files a **Seerr issue** under your Seerr user if your Discord ID is linked there. Admins see it in the admin channel and handle it in Seerr as usual. When it's marked **resolved**, the reporter gets a DM, either straight away via Seerr's *Issue Resolved* webhook or within `REQUEST_RECONCILE_MINUTES` from the bot's own check. If their DMs are closed, they get a mention in the announcements channel instead (only while announcements are on).
 
 ## Self-serve redownloads
 
@@ -323,11 +339,11 @@ Members fix broken files themselves instead of waiting for an admin. It's built 
 3. The member sees what's on Plex now vs. the replacement, and can **Pick a different release** from the top 10.
 4. The app downloads it. **The old file stays playable the whole time.**
 5. When the download is finished and the app says the *only* thing stopping the import is the existing file, the bot moves just the files the new download replaces to the recycling bin (for a season, only episodes actually in the pack) and the app imports the new one.
-6. The old release is blocklisted so it's never grabbed again. The member gets a DM (or a mention in the announcements channel if DMs are closed). The bot doesn't announce the fresh copy as "new on Plex".
+6. The old release is blocklisted so it's never grabbed again. The member gets a DM (or, while announcements are on, a mention in the announcements channel if DMs are closed). The bot doesn't announce the fresh copy as "new on Plex".
 
 If a download fails, imports with a different problem or takes over 24 hours, it's removed and blocklisted, and the next release is tried (3 in total). The original is untouched until step 5. If the import doesn't happen within 20 minutes after the swap, the job goes to 🆘 **needs admin**: the log pings the admin role with where the old file is (recycling bin) and how to finish it (the app's Activity → Queue → Manual Import). Jobs survive bot restarts.
 
-**What members see:** a tracker card in their DMs that updates itself as it goes: request received → found a fresh copy (quality, size) → downloading (progress bar and time left) → swapping in → ready to watch. It says when a copy didn't work out and another is being tried, and warns that the title can vanish from Plex for a minute during the swap. It has **Refresh** and **Cancel** buttons (Cancel asks first), and when it's done they get a fresh "ready to watch" message so their phone buzzes. It never mentions Radarr, Sonarr, torrents and so on. If their DMs are closed, the reply where they started it updates for the first 15 minutes, `/redownload status` shows the same live card anytime, and the final ping goes to the announcements channel.
+**What members see:** a tracker card in their DMs that updates itself as it goes: request received → found a fresh copy (quality, size) → downloading (progress bar and time left) → swapping in → ready to watch. It says when a copy didn't work out and another is being tried, and warns that the title can vanish from Plex for a minute during the swap. It has **Refresh** and **Cancel** buttons (Cancel asks first), and when it's done they get a fresh "ready to watch" message so their phone buzzes. It never mentions Radarr, Sonarr, torrents and so on. If their DMs are closed, the reply where they started it updates for the first 15 minutes, `/redownload status` shows the same live card anytime, and (while announcements are on) the final ping goes to the announcements channel.
 
 **The log:** one message per redownload in the log channel, edited as it goes: who (Discord + Plex username), what, the problem and description, old vs. new release and a timeline. Buttons: **Cancel** (before the swap), **Approve / Deny** (approve-first mode), **Mark resolved** (needs admin) and **Ban requester**. The apps' own "manual interaction required" / "download failed" alerts for these downloads are kept out of the admin channel, since the log already covers them.
 
@@ -457,7 +473,7 @@ Restart the bot. Commands are re-registered on every start, and `/help` lists it
 
 ### Adding a webhook source
 
-Write a parser in `src/webhooks/<name>.ts` that turns the payload into `InboundEvent[]`, either `media` events (announcements, with `confirms: true` if the event proves the item is watchable) or `alert` events (admin notices). Then add it to `webhookParsers` in `src/webhooks/index.ts`. It's served at `/webhook/<name>` straight away, with batching, dedupe and requester mentions handled for you.
+Write a parser in `src/webhooks/<name>.ts` that turns the payload into `InboundEvent[]`, either `media` events (announcements, with `confirms: true` if the event proves the item is watchable) or `alert` events (admin notices). Then add it to `webhookParsers` in `src/webhooks/index.ts`. It's served at `/webhook/<name>` straight away, with batching, dedupe and request-tracker nudges handled for you.
 
 ---
 

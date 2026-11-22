@@ -24,6 +24,7 @@ import { randomBytes } from "node:crypto";
 import { Colors, truncate } from "../core/discord.js";
 import { log } from "../core/logger.js";
 import type { BotModule, ModuleFactory } from "../core/module.js";
+import { dmFallbackChannel } from "../notify/announce.js";
 import { TtlCache } from "../core/ttlCache.js";
 import { MissingEngine } from "../missing/engine.js";
 import { trackerEmbed, trackerPayload } from "../missing/render.js";
@@ -71,7 +72,7 @@ export const missing: ModuleFactory = (ctx) => {
   const mstore = new MissingStore(store);
   const rstore = new RedownloadStore(store);
   const plexTv = plexTvFor(ctx);
-  const engine = new MissingEngine({ api, mstore, client, cfg });
+  const engine = new MissingEngine({ api, mstore, client, cfg, fallbackChannel: () => dmFallbackChannel(store, cfg.channels.notify) });
   const sessions = new TtlCache<string, Session>(10 * 60_000);
   const library = new TtlCache<string, Array<{ value: string; name: string; hay: string }>>(5 * 60_000);
 

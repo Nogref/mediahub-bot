@@ -6,10 +6,11 @@ import type { Client, EmbedBuilder, SendableChannels } from "discord.js";
 import type { Config } from "../config.js";
 import type { Store } from "../core/db.js";
 import { log } from "../core/logger.js";
+import { announcementsOn } from "./announce.js";
 import type { OptCategory, RoleDirectory } from "../core/roles.js";
 import { TtlCache } from "../core/ttlCache.js";
 import type { AlertEvent, InboundEvent, MediaEvent } from "./events.js";
-import { mergeEvents, readyLines, renderAlerts, renderSingle, renderSummary, type RenderItem } from "./render.js";
+import { mergeEvents, renderAlerts, renderSingle, renderSummary, type RenderItem } from "./render.js";
 
 interface Bucket {
   media: Map<string, MediaEvent>;
@@ -119,21 +120,11 @@ export class Notifier {
     }
     this.buckets.delete(channelId);
 
+    // Requesters hear about their own requests by DM (the request tracker), so
+    // announcements never @ them, and media isn't posted at all while announcements are off.
     const fresh: RenderItem[] = [];
-    const readyOnly: RenderItem[] = [];
-    const notifiedIds: number[] = [];
-
-    for (const ev of bucket.media.values()) {
-      const pending = ev.confirms && ev.match ? this.store.findPending(ev.match) : [];
-      const requesters = [...new Set(pending.map((p) => p.discordUserId))];
-      notifiedIds.push(...pending.map((p) => p.id));
-      const item = { event: ev, requesters };
-      if (this.recentMedia.has(ev.dedupeKey)) {
-        // Already announced (e.g. Radarr reported it earlier); only ping whoever asked for it.
-        if (requesters.length) readyOnly.push(item);
-      } else {
-        fresh.push(item);
-      }
+    if (announcementsOn(this.store)) {
+      for (const ev of bucket.media.values()) if (!this.recentMedia.has(ev.dedupeKey)) fresh.push({ event: ev, requesters: [] });
     }
 
     const alerts = [...bucket.alerts.values()].filter((a) => !this.recentAlerts.has(a.dedupeKey));
@@ -142,26 +133,22 @@ export class Notifier {
     if (fresh.length === 1) embeds.push(renderSingle(fresh[0]));
     else if (fresh.length > 1) embeds.push(renderSummary(fresh));
     if (alerts.length) embeds.push(renderAlerts(alerts));
-    // Opt-in role pings for the categories in this batch, then personal "your request is ready" lines.
+    // Opt-in role pings for the categories in this batch.
     const roleIds = [...new Set(fresh.map((it) => categoryOf(it.event)).map((c) => this.roles?.get(c)).filter((r): r is string => Boolean(r)))];
-    const content = [roleIds.map((r) => `<@&${r}>`).join(" "), readyLines([...fresh, ...readyOnly])].filter(Boolean).join("\n");
+    const content = roleIds.map((r) => `<@&${r}>`).join(" ");
     if (!embeds.length && !content) return;
-
-    const userIds = [...new Set([...fresh, ...readyOnly].flatMap((i) => i.requesters))];
     try {
       const channel = await this.client.channels.fetch(channelId);
       if (!channel?.isSendable()) throw new Error(`channel ${channelId} is not a text channel the bot can post in`);
       await (channel as SendableChannels).send({
         content: content || undefined,
         embeds,
-        allowedMentions: { users: userIds, roles: roleIds, parse: [] },
+        allowedMentions: { roles: roleIds, parse: [] },
       });
       for (const it of fresh) this.recentMedia.set(it.event.dedupeKey, true);
       for (const a of alerts) this.recentAlerts.set(a.dedupeKey, true);
-      this.store.markNotified(notifiedIds);
-      log.info(`notify: posted ${fresh.length} new item(s), ${readyOnly.length} ready ping(s), ${alerts.length} alert(s) to ${channelId}`);
+      log.info(`notify: posted ${fresh.length} new item(s), ${alerts.length} alert(s) to ${channelId}`);
     } catch (err) {
-      // Requests stay pending, so the reconciler will retry the mention later.
       log.error(`notify: failed to post to channel ${channelId}: ${(err as Error).message}`);
     }
   }

@@ -32,7 +32,7 @@ export interface TrackedRequest {
   createdAt: number;
 }
 
-export type NewRequest = Omit<TrackedRequest, "id" | "status" | "createdAt">;
+export type NewRequest = Omit<TrackedRequest, "id" | "status" | "createdAt"> & { createdAt?: number };
 
 /** Identifiers carried by an inbound "this is now available" event. */
 export interface MatchKeys {
@@ -233,9 +233,14 @@ export class Store {
         posterUrl: r.posterUrl ?? null,
         normTitle: normalizeTitle(r.title),
         normArtist: normalizeTitle(r.artistName),
-        createdAt: Date.now(),
+        createdAt: r.createdAt ?? Date.now(),
       });
     return Number(info.lastInsertRowid);
+  }
+
+  requestById(id: number): TrackedRequest | undefined {
+    const r = this.db.prepare("SELECT * FROM requests WHERE id = ?").get(id) as Row | undefined;
+    return r ? toRequest(r) : undefined;
   }
 
   pendingRequests(): TrackedRequest[] {
@@ -291,6 +296,11 @@ export class Store {
     const stmt = this.db.prepare("UPDATE requests SET status = 'notified', notified_at = ? WHERE id = ?");
     const now = Date.now();
     this.db.transaction(() => ids.forEach((id) => stmt.run(now, id)))();
+  }
+
+  /** Declined or given up on: no longer pending. */
+  endRequest(id: number) {
+    this.db.prepare("UPDATE requests SET status = 'expired' WHERE id = ? AND status = 'pending'").run(id);
   }
 
   /** Stops tracking requests older than the cut-off so the reconciler doesn't poll forever. */

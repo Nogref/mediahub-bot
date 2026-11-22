@@ -50,8 +50,7 @@ export const DEFAULT_POSTS: Record<PostName, PostContent> = {
       "**🎬 Getting something added**\n" +
         "`/request movie` or `/request series`: search, tap a result, done. There's no approval queue, it just downloads.\n" +
         "`/request album`: the same for music.\n" +
-        "`/requests`: how your requests are doing, with live download progress.\n" +
-        "You'll get an @-mention here when something you asked for is ready.",
+        "I'll DM you a live tracker that shows how it's going, and message you when it's ready. `/requests` shows them all.",
       "**🎵 Music**\n" +
         "`/music play` plays our library in whatever voice channel you're in, and `/music radio` plays random songs.\n" +
         "`/aurral` gets you your own Aurral account to stream on your phone or computer: {aurral}\n\n" +
@@ -61,7 +60,7 @@ export const DEFAULT_POSTS: Record<PostName, PostContent> = {
         "File glitchy or the audio's off? `/redownload start` swaps in a fresh copy and keeps you posted in your DMs. Episode missing from a season? `/missing` finds and downloads it. For anything else (missing subtitles, wrong info…), `/report` it and you'll get a DM when it's fixed. `/status` shows whether everything's up.\n" +
         "Got an idea for the server? `/suggest` it, and 👍 the ideas you like.\n\n" +
         "**🔔 Pings**\n" +
-        "Use the button below (or `/pings`) to choose which announcements ping you. Requests you make yourself always ping you.\n\n" +
+        "Use the button below (or `/pings`) to choose what pings you.\n\n" +
         "Lost? Type `/help` for everything I can do.",
     ],
   },

@@ -4,11 +4,12 @@ import { parseSeerr } from "../dist/webhooks/seerr.js";
 import { parseTautulli } from "../dist/webhooks/tautulli.js";
 import { parseRadarr, parseSonarr, parseLidarr } from "../dist/webhooks/arr.js";
 import { parseAurral } from "../dist/webhooks/aurral.js";
-import { episodeRuns, renderSummary, renderSingle, readyLines } from "../dist/notify/render.js";
+import { episodeRuns, renderSummary, renderSingle } from "../dist/notify/render.js";
 import { HealthTracker, overall, instantViews } from "../dist/modules/statusBoard.js";
 import { inviteIsValid, wizarrDate } from "../dist/services/wizarr.js";
 import { normalizeTitle, Store } from "../dist/core/db.js";
 import { Notifier } from "../dist/notify/notifier.js";
+import { setAnnouncements } from "../dist/notify/announce.js";
 import { fakeClient, fakeConfig, json } from "./helpers.mjs";
 
 test("Seerr MEDIA_AVAILABLE becomes a confirming movie event", () => {
@@ -80,7 +81,6 @@ test("summary embed groups by type and shows requesters", () => {
   assert.match(e.description, /\*\*🎬 Movies\*\*\n• Heat \(1995\) — requested by <@u1>/);
   assert.match(e.description, /Severance — S02E01–E02 \(2 episodes\)/);
   assert.match(e.description, /OK Computer — Radiohead/);
-  assert.match(readyLines(items), /<@u1> — \*\*Heat \(1995\)\*\* is ready on Plex/);
   const single = json(renderSingle(items[0]));
   assert.equal(single.fields[0].value, "<@u1>");
 });
@@ -126,40 +126,37 @@ test("normalizeTitle strips edition noise", () => {
   assert.equal(normalizeTitle("Beyoncé & Jay-Z"), "beyonce and jay z");
 });
 
-test("notifier: batches per channel, dedupes across sources, pings requester once confirmed", async () => {
+test("notifier: nothing public while announcements are off; when on, batches and dedupes, and never @s requesters", async () => {
   const cfg = fakeConfig();
   const store = new Store(cfg.dataDir);
   const client = fakeClient();
   const n = new Notifier(client, store, cfg);
   store.addRequest({ discordUserId: "u1", kind: "movie", target: "seerr", title: "The Matrix", tmdbId: 603 });
 
-  // Radarr import: announced, but not a Plex confirmation → no ping yet.
+  // Off (the default): admin alerts still go out, new media isn't posted.
   n.publish(parseRadarr({ eventType: "Download", movie: { title: "The Matrix", year: 1999, tmdbId: 603 } }));
-  n.publish(parseSonarr({ eventType: "Download", series: { title: "Severance" }, episodes: [{ seasonNumber: 2, episodeNumber: 1 }] }));
   n.publish(parseLidarr({ eventType: "Health", level: "warning", message: "Disk low", type: "Disk" }));
   await n.flush("c-notify");
   await n.flush("c-admin");
-  assert.equal(client.sent.length, 2);
-  const media = client.sent.find((s) => s.channelId === "c-notify").payload;
+  assert.equal(client.sent.length, 1);
+  assert.match(json(client.sent[0].payload.embeds[0]).title, /Lidarr health issue/);
+  assert.equal(client.sent[0].channelId, "c-admin");
+
+  setAnnouncements(store, true);
+  n.publish(parseRadarr({ eventType: "Download", movie: { title: "The Matrix", year: 1999, tmdbId: 603 } }));
+  n.publish(parseSonarr({ eventType: "Download", series: { title: "Severance" }, episodes: [{ seasonNumber: 2, episodeNumber: 1 }] }));
+  await n.flush("c-notify");
+  const media = client.sent.at(-1).payload;
+  assert.equal(client.sent.at(-1).channelId, "c-notify");
   assert.equal(media.content, undefined);
   assert.match(json(media.embeds[0]).title, /2 new additions/);
-  assert.equal(store.pendingRequests().length, 1);
-  const alert = client.sent.find((s) => s.channelId === "c-admin").payload;
-  assert.match(json(alert.embeds[0]).title, /Lidarr health issue/);
+  assert.doesNotMatch(JSON.stringify(media), /<@u1>/, "requesters get a DM instead");
+  assert.equal(store.pendingRequests().length, 1, "the request tracker marks it done, not the notifier");
 
-  // Seerr says it's available: already announced, so only the mention goes out.
+  // Seerr confirms it later: already announced, nothing more to post.
   n.publish(parseSeerr({ notification_type: "MEDIA_AVAILABLE", subject: "The Matrix (1999)", media: { media_type: "movie", tmdbId: "603" }, request: { request_id: "77" } }));
   await n.flush("c-notify");
-  const ping = client.sent[2].payload;
-  assert.equal(ping.embeds.length, 0);
-  assert.match(ping.content, /<@u1> — \*\*The Matrix \(1999\)\*\* is ready on Plex/);
-  assert.deepEqual(ping.allowedMentions, { users: ["u1"], roles: [], parse: [] });
-  assert.equal(store.pendingRequests().length, 0, "request marked notified");
-
-  // Same event again: nothing left to say.
-  n.publish(parseSeerr({ notification_type: "MEDIA_AVAILABLE", subject: "The Matrix (1999)", media: { media_type: "movie", tmdbId: "603" } }));
-  await n.flush("c-notify");
-  assert.equal(client.sent.length, 3);
+  assert.equal(client.sent.length, 2);
   n.stop();
   store.close();
 });

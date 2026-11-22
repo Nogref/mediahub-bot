@@ -41,7 +41,7 @@ export const moduleFactories: ModuleFactory[] = [
   invites, //       /invite create|list|revoke   → Wizarr
   aurralAccounts, // /aurral · /invite aurral · /admin aurral link
   webhooks, //      POST /webhook/:service       → batched announcements + @mentions
-  requestTracker, // polls pending bot requests  → @mentions if a webhook was missed
+  requestTracker, // live DM trackers for requests (also ones made on the Seerr website)
   statusBoard, //   live board, /setup statusboard, /status
   stats, //         /stats + /setup stats board
   random, //        /random movie                → Plex

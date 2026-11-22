@@ -67,6 +67,8 @@ export function pickFallback(releases: Json[], kind: keyof typeof MIN_SIZE): Jso
 export interface MissingDeps {
   api: { sonarr?: ArrApi; radarr?: ArrApi };
   mstore: MissingStore;
+  /** Where to @ the member when their DMs are closed (only while announcements are on). */
+  fallbackChannel?: () => string | undefined;
   client: Client;
   cfg: Config;
 }
@@ -569,8 +571,9 @@ export class MissingEngine {
       line += ` ${j.items.length === 1 ? "It's" : other.length === j.items.length ? "They're" : "Some are"} a ${q} copy for now, since that's all that was out there.`;
     }
     const sent = await dm(this.d.client, j.discordUserId, line);
-    if (!sent && this.d.cfg.channels.notify) {
-      const ch = await this.d.client.channels.fetch(this.d.cfg.channels.notify).catch(() => null);
+    const fallback = this.d.fallbackChannel?.();
+    if (!sent && fallback) {
+      const ch = await this.d.client.channels.fetch(fallback).catch(() => null);
       if (ch?.isSendable()) await (ch as SendableChannels).send({ content: `<@${j.discordUserId}> ${line}`, allowedMentions: { users: [j.discordUserId] } }).catch(() => undefined);
     }
   }

@@ -5,6 +5,7 @@ import { startArrMock } from "./mockArr.mjs";
 import { fakeClient, fakeConfig, fakeInteraction, json } from "./helpers.mjs";
 import { buildServices } from "../dist/services/index.js";
 import { Store } from "../dist/core/db.js";
+import { setAnnouncements } from "../dist/notify/announce.js";
 import { Notifier } from "../dist/notify/notifier.js";
 import { Registry } from "../dist/core/registry.js";
 import { moduleFactories } from "../dist/modules/index.js";
@@ -586,6 +587,8 @@ test("tracker: DMs closed → the reply says where to look, /redownload status s
   assert.deepEqual(out.components[0].toJSON().components.map((b) => b.custom_id), [`rdt:refresh:${job.id}`, `rdt:cancel:${job.id}`]);
   assert.doesNotMatch(text(out), JARGON);
 
+  // Closed DMs only fall back to an @ in announcements while announcements are on.
+  setAnnouncements(env.store, true);
   mock.finish("Heat.1995.1080p.BluRay.x264-GOOD", { messages: [NOT_UPGRADE] });
   await env.engine.tick(job.id);
   await env.engine.tick(job.id);

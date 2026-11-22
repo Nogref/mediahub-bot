@@ -66,6 +66,9 @@ export interface SeerrMediaDetails {
 export interface SeerrRequest {
   id: number;
   status: number; // 1 pending approval, 2 approved, 3 declined, 4 failed, 5 completed
+  type?: SeerrMediaType;
+  createdAt?: string;
+  seasons?: Array<{ seasonNumber: number }>;
   media?: SeerrMediaInfo & { mediaType?: SeerrMediaType };
   requestedBy?: { id: number; displayName?: string };
 }
@@ -188,6 +191,22 @@ export class SeerrClient {
    */
   async userIdForDiscord(discordId: string): Promise<number | undefined> {
     if (!this.cfg.attributeUsers) return undefined;
+    return (await this.discordUsers())?.get(discordId);
+  }
+
+  /** The Discord account(s) a Seerr user saved in Profile → Notifications (for tracking requests made in Seerr). */
+  async discordIdsForUser(seerrUserId: number): Promise<string[]> {
+    const map = await this.discordUsers();
+    return map ? [...map.entries()].filter(([, uid]) => uid === seerrUserId).map(([d]) => d) : [];
+  }
+
+  /** Newest requests first. */
+  async recentRequests(take = 50): Promise<SeerrRequest[]> {
+    const page = await this.call<{ results: SeerrRequest[] }>(`/request`, { query: { take, skip: 0, sort: "added", filter: "all" } });
+    return page.results ?? [];
+  }
+
+  private async discordUsers(): Promise<Map<string, number> | undefined> {
     let map = this.discordMap.get("all");
     if (!map) {
       map = new Map();
@@ -218,6 +237,6 @@ export class SeerrClient {
         return undefined;
       }
     }
-    return map.get(discordId);
+    return map;
   }
 }

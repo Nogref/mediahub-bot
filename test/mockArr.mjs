@@ -165,7 +165,9 @@ export async function startArrMock() {
       if (app === "radarr") return send(200, qp.movieId === "1" ? s.releases.movie : []);
       return send(200, qp.episodeId ? s.releases.episode : s.releases.season);
     }
-    if (r === "/queue/details") return send(200, s.queue.filter((x) => x.app === app));
+    if (r === "/queue/details") {
+      return send(200, s.queue.filter((x) => x.app === app && (!qp.movieId || x.movieId === Number(qp.movieId)) && (!qp.seriesId || x.seriesId === Number(qp.seriesId))));
+    }
     if (r.startsWith("/queue/") && m === "DELETE") {
       const id = Number(r.split("/")[2]);
       s.queue = s.queue.filter((x) => x.id !== id);
@@ -205,7 +207,7 @@ export async function startArrMock() {
     }
 
     // Radarr library
-    if (r === "/movie") return send(200, s.movies);
+    if (r === "/movie") return send(200, qp.tmdbId ? s.movies.filter((x) => x.tmdbId === Number(qp.tmdbId)) : s.movies);
     if (r.startsWith("/movie/")) {
       const mv = s.movies.find((x) => x.id === Number(r.split("/")[2]));
       return mv ? send(200, mv) : send(404, { message: "NotFound" });
@@ -221,7 +223,7 @@ export async function startArrMock() {
     if (r === "/manualimport") return send(200, s.preview[qp.downloadId] ?? []);
 
     // Sonarr library
-    if (r === "/series") return send(200, s.series);
+    if (r === "/series") return send(200, qp.tvdbId ? s.series.filter((x) => x.tvdbId === Number(qp.tvdbId)) : s.series);
     if (r.startsWith("/series/")) return send(200, s.series.find((x) => x.id === Number(r.split("/")[2])));
     if (r === "/episode") return send(200, s.episodes.filter((e) => e.seriesId === Number(qp.seriesId) && (qp.seasonNumber === undefined || e.seasonNumber === Number(qp.seasonNumber))));
     if (r === "/episodefile") return send(200, s.episodeFiles.filter((f) => f.seriesId === Number(qp.seriesId)));

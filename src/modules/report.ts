@@ -7,6 +7,7 @@ import { MessageFlags, type AutocompleteInteraction, type ChatInputCommandIntera
 import { dm, truncate, yearOf } from "../core/discord.js";
 import { log } from "../core/logger.js";
 import type { ModuleFactory } from "../core/module.js";
+import { dmFallbackChannel } from "../notify/announce.js";
 import { IssueType, MediaStatus, type SeerrMediaType, type SeerrSearchResult } from "../services/seerr.js";
 
 const PROBLEMS = [
@@ -34,9 +35,10 @@ export const report: ModuleFactory = ({ services, store, cfg, client, notifier }
     const r = store.closeReport(issueId);
     if (!r) return;
     const sent = await dm(client, r.discordUserId, `✅ The problem you reported with **${r.title}** has been marked fixed. Thanks for flagging it!`);
-    if (!sent && cfg.channels.notify) {
-      // DMs closed: fall back to a mention in the announcements channel.
-      const ch = await client.channels.fetch(cfg.channels.notify).catch(() => null);
+    const fallback = dmFallbackChannel(store, cfg.channels.notify);
+    if (!sent && fallback) {
+      // DMs closed: fall back to a mention in the announcements channel (only while announcements are on).
+      const ch = await client.channels.fetch(fallback).catch(() => null);
       if (ch?.isSendable()) {
         await ch
           .send({ content: `✅ <@${r.discordUserId}> the problem you reported with **${r.title}** has been fixed.`, allowedMentions: { users: [r.discordUserId] } })

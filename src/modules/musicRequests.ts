@@ -67,7 +67,7 @@ export function fromLidarr(album: LidarrAlbum): MusicCandidate {
   };
 }
 
-export const musicRequests: ModuleFactory = ({ services, store, cfg }) => {
+export const musicRequests: ModuleFactory = ({ services, store, cfg, bus }) => {
   const lidarr = services.lidarr;
   const aurral = services.aurral;
   if (!lidarr && !aurral) return null;
@@ -99,20 +99,18 @@ export const musicRequests: ModuleFactory = ({ services, store, cfg }) => {
   }
 
   /** Primary first; on outage or zero hits, the other one. */
-  async function search(q: string): Promise<{ candidates: MusicCandidate[]; note?: string }> {
-    let note: string | undefined;
+  async function search(q: string): Promise<{ candidates: MusicCandidate[] }> {
     let lastErr: unknown;
     for (const [idx, src] of order.entries()) {
       const next = order[idx + 1];
       try {
         const candidates = await searchSource(src, q);
-        if (candidates.length || !next) return { candidates, note };
-        note = `${NAMES[src]} found nothing, so these results come from ${NAMES[next]}.`;
+        if (candidates.length || !next) return { candidates };
+        log.info(`music: ${NAMES[src]} found nothing for "${q}"; trying ${NAMES[next]}`);
       } catch (err) {
         if (!(err instanceof ApiError) || !next) throw err;
         lastErr = err;
         log.warn(`music: ${NAMES[src]} search failed (${err.message}); trying ${NAMES[next]}`);
-        note = `${NAMES[src]} isn't reachable right now, so I searched ${NAMES[next]} instead.`;
       }
     }
     if (lastErr) throw lastErr;
@@ -122,7 +120,7 @@ export const musicRequests: ModuleFactory = ({ services, store, cfg }) => {
   async function command(i: ChatInputCommandInteraction) {
     const q = i.options.getString("query", true).trim();
     await i.deferReply({ flags: MessageFlags.Ephemeral });
-    const { candidates, note } = await search(q);
+    const { candidates } = await search(q);
     if (!candidates.length) {
       await i.editReply(`🔍 No albums found for **${truncate(q, 80)}**. Try "artist album" or check the spelling.`);
       return;
@@ -131,7 +129,7 @@ export const musicRequests: ModuleFactory = ({ services, store, cfg }) => {
     sessions.set(sid, { userId: i.user.id, candidates });
 
     const label = (c: MusicCandidate) =>
-      c.state === "available" ? "✅ Already in the library" : c.state === "monitored" ? "⏳ Already requested — Lidarr is watching for it" : "➕ Not in the library yet";
+      c.state === "available" ? "✅ Already in the library" : c.state === "monitored" ? "⏳ Already requested, on its way" : "➕ Not in the library yet";
     const embeds = candidates.map((c, idx) => {
       const e = new EmbedBuilder()
         .setColor(c.state === "available" ? Colors.ok : c.state === "monitored" ? Colors.info : Colors.muted)
@@ -151,7 +149,7 @@ export const musicRequests: ModuleFactory = ({ services, store, cfg }) => {
       ),
     );
     await i.editReply({
-      content: `Albums for **${truncate(q, 80)}**. Pick one to request it:${note ? `\n*${note}*` : ""}`,
+      content: `Albums for **${truncate(q, 80)}**. Pick one to request it:`,
       embeds,
       components: [row],
     });
@@ -175,9 +173,9 @@ export const musicRequests: ModuleFactory = ({ services, store, cfg }) => {
     if (!album) {
       let artist = c.artistMbid ? await lidarr!.artistByMbId(c.artistMbid) : undefined;
       if (!artist) {
-        if (!c.artistMbid) throw new Error("This result has no MusicBrainz artist ID, so Lidarr can't add it.");
+        if (!c.artistMbid) throw new Error("This result is missing some details, so I can't request it. Try another result.");
         const d = await lidarr!.addDefaults();
-        await progress(`⏳ Adding **${c.artistName}** to Lidarr… new artists can take up to a minute.`);
+        await progress(`⏳ Adding **${c.artistName}** to the music library… new artists can take up to a minute.`);
         artist = await lidarr!.addArtist({
           artistName: c.artistName,
           foreignArtistId: c.artistMbid,
@@ -221,7 +219,7 @@ export const musicRequests: ModuleFactory = ({ services, store, cfg }) => {
   }
 
   async function viaAurral(c: MusicCandidate): Promise<Outcome> {
-    if (!c.artistMbid) throw new Error("This result has no MusicBrainz artist ID, so Aurral can't request it.");
+    if (!c.artistMbid) throw new Error("This result is missing some details, so I can't request it. Try another result.");
     const res = await (aurral as AurralClient).requestAlbum({
       albumMbid: c.albumMbid,
       albumName: c.title,
@@ -256,7 +254,6 @@ export const musicRequests: ModuleFactory = ({ services, store, cfg }) => {
     // Try the result's own source first, then the other one when it's down or can't find the album.
     const tryOrder: Source[] = [c.source, ...order.filter((s) => s !== c.source)];
     let outcome: Outcome | undefined;
-    let note: string | undefined;
     let lastErr: unknown;
     for (const [idx, src] of tryOrder.entries()) {
       try {
@@ -268,20 +265,18 @@ export const musicRequests: ModuleFactory = ({ services, store, cfg }) => {
         const fallbackWorthy = err instanceof ApiError && (err.unreachable || err.status === 404);
         if (!next || !fallbackWorthy) throw err;
         log.warn(`music: ${NAMES[src]} request failed (${(err as Error).message}); falling back to ${NAMES[next]}`);
-        note = `${NAMES[src]} couldn't take it (${(err as ApiError).unreachable ? "unreachable" : "album not found"}), so I sent it to ${NAMES[next]}.`;
-        await progress(`⏳ ${note}`);
+        await progress(`⏳ Requesting **${c.title}** by **${c.artistName}** another way…`);
       }
     }
     if (!outcome) throw lastErr;
 
     const embed = new EmbedBuilder().setThumbnail(c.coverUrl ?? null).setURL(`https://musicbrainz.org/release-group/${c.albumMbid}`);
-    const where = cfg.channels.notify ? ` in <#${cfg.channels.notify}>` : "";
-    const heading = `${c.title} — ${c.artistName}`;
+    const heading = `${c.title} by ${c.artistName}`;
 
     if (outcome.state === "available") {
       embed.setColor(Colors.ok).setTitle(truncate(`✅ Already in the library: ${heading}`, 256)).setDescription("It's ready to stream.");
     } else {
-      store.addRequest({
+      const id = store.addRequest({
         discordUserId: i.user.id,
         kind: "album",
         target: outcome.via,
@@ -294,21 +289,14 @@ export const musicRequests: ModuleFactory = ({ services, store, cfg }) => {
         aurralAlbumId: outcome.aurralAlbumId,
         posterUrl: c.coverUrl,
       });
-      const warn = outcome.state === "saved-no-source";
+      log.info(`music: ${i.user.id} requested ${heading} via ${NAMES[outcome.via]}: ${outcome.steps.join("; ")}`);
+      const note = outcome.state === "saved-no-source" ? "⚠️ An admin needs to finish setting up music downloads before this can download." : undefined;
+      await i.editReply({ content: "✅ Requested! Setting up your tracker…", embeds: [], components: [] });
+      if (bus.emit("request-created", { id, reply: i, note })) return;
       embed
-        .setColor(warn ? Colors.warn : Colors.ok)
+        .setColor(note ? Colors.warn : Colors.ok)
         .setTitle(truncate(`🎵 Requested: ${heading}`, 256))
-        .setDescription(
-          [
-            ...outcome.steps.map((s) => `• ${s}`),
-            "",
-            warn ? "An admin needs to add a download source in Aurral before this can download." : `I'll @ you${where} when it's ready to stream.`,
-            note ? `\n*${note}*` : "",
-          ]
-            .join("\n")
-            .trim(),
-        )
-        .setFooter({ text: `via ${NAMES[outcome.via]}` });
+        .setDescription(note ?? "It's on its way. `/requests` shows how it's going.");
     }
     await i.editReply({ content: "", embeds: [embed], components: [] });
   }

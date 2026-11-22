@@ -1,6 +1,7 @@
 /**
  * Ping settings: Movies / TV / Music / Server status roles, toggled with
  * buttons. Only controls who gets @-pinged; every feature stays open to all.
+ * Movies / TV / Music only show while announcements are on (/setup announcements).
  *  - /pings                        your settings, privately
  *  - "🔔 Ping settings" button     on the welcome post (opens the same thing)
  *  - /setup pings channel:#x       (admin) standalone public panel
@@ -20,17 +21,19 @@ import { Colors, DiscordCodes, discordErrorCode } from "../core/discord.js";
 import { LiveMessage } from "../core/liveMessage.js";
 import { log } from "../core/logger.js";
 import type { ModuleFactory } from "../core/module.js";
-import { OPT_CATEGORIES, type OptCategory } from "../core/roles.js";
+import { OPT_CATEGORIES, visibleCategories, type OptCategory } from "../core/roles.js";
+import { announcementsOn, setAnnouncements } from "../notify/announce.js";
 import { SETUP } from "./parents.js";
 
 export const ROLE_PERMISSION_HELP =
   "I need the **Manage Roles** permission, and my role has to sit **above** the ping roles in Server Settings → Roles.";
 
-export const pings: ModuleFactory = ({ roles, store, client }) => {
+export const pings: ModuleFactory = ({ roles, store, client, bus, cfg }) => {
   const panel = new LiveMessage(client, store, "pings-panel");
+  const cats = () => visibleCategories(announcementsOn(store));
 
   function embed(member?: GuildMember) {
-    const lines = OPT_CATEGORIES.map((c) => {
+    const lines = cats().map((c) => {
       const roleId = roles.get(c.key);
       const on = member && roleId ? member.roles.cache.has(roleId) : undefined;
       return `${c.emoji} **${c.name}**${on === undefined ? "" : on ? " · ✅ on" : " · off"}\n${c.blurb}`;
@@ -40,13 +43,13 @@ export const pings: ModuleFactory = ({ roles, store, client }) => {
       .setTitle(member ? "🔔 Your ping settings" : "🔔 Choose what pings you")
       .setDescription(
         `${lines.join("\n\n")}\n\nTap to switch each one on or off.\n` +
-          "*Everything (requests, music, Aurral) works for everyone either way, and your own requests always ping you when they're ready.*",
+          "*Everything works for everyone either way. When you request something, I DM you a live tracker and let you know when it's ready.*",
       );
   }
 
   function buttons(scope: "p" | "e", member?: GuildMember) {
     return new ActionRowBuilder<ButtonBuilder>().addComponents(
-      OPT_CATEGORIES.map((c) => {
+      cats().map((c) => {
         const roleId = roles.get(c.key);
         const on = Boolean(member && roleId && member.roles.cache.has(roleId));
         return new ButtonBuilder()
@@ -60,7 +63,7 @@ export const pings: ModuleFactory = ({ roles, store, client }) => {
 
   /** The private settings view (used by /pings and the welcome post's button). */
   async function showPrivate(i: ChatInputCommandInteraction | MessageComponentInteraction) {
-    if (OPT_CATEGORIES.some((c) => !roles.get(c.key))) {
+    if (cats().some((c) => !roles.get(c.key))) {
       try {
         await roles.ensure(i.guild!);
       } catch (err) {
@@ -91,10 +94,15 @@ export const pings: ModuleFactory = ({ roles, store, client }) => {
     );
   }
 
+  /** The public panel's buttons follow the announcements switch. */
+  async function refreshPanel() {
+    if (panel.location) await panel.update({ embeds: [embed()], components: [buttons("p")] }).catch(() => undefined);
+  }
+
   async function toggle(i: MessageComponentInteraction) {
     const [, cat, scope] = i.customId.split(":") as [string, OptCategory | "open", "p" | "e"];
     if (cat === "open") return showPrivate(i);
-    const meta = OPT_CATEGORIES.find((c) => c.key === cat);
+    const meta = cats().find((c) => c.key === cat);
     const roleId = roles.get(cat);
     if (!meta || !roleId) {
       await i.reply({ content: "Ping settings aren't set up yet. Ask an admin to run `/setup welcome` or `/setup pings`.", flags: MessageFlags.Ephemeral });
@@ -121,7 +129,7 @@ export const pings: ModuleFactory = ({ roles, store, client }) => {
 
   return {
     name: "pings",
-    commands: [{ name: "pings", description: "Choose which announcements @-ping you", execute: showPrivate }],
+    commands: [{ name: "pings", description: "Choose what the bot @-pings you about", execute: showPrivate }],
     subcommands: [
       {
         parent: "setup",
@@ -132,6 +140,35 @@ export const pings: ModuleFactory = ({ roles, store, client }) => {
         build: (b) =>
           b.addChannelOption((o) => o.setName("channel").setDescription("Where to post it").addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement).setRequired(true)),
         execute: setupPanel,
+      },
+      {
+        parent: "setup",
+        parentDescription: SETUP.parentDescription,
+        gate: "admin",
+        name: "announcements",
+        description: "Post \"new on Plex\" announcements publicly, or not (requests are DMed either way)",
+        build: (b) =>
+          b.addStringOption((o) =>
+            o
+              .setName("mode")
+              .setDescription("On: post new movies, shows and albums. Off: no public posts")
+              .setRequired(true)
+              .addChoices({ name: "On", value: "on" }, { name: "Off", value: "off" }),
+          ),
+        execute: async (i) => {
+          const on = i.options.getString("mode", true) === "on";
+          setAnnouncements(store, on);
+          log.info(`announcements: ${on ? "on" : "off"} (${i.user.id})`);
+          await refreshPanel();
+          bus.emit("help-changed");
+          const where = cfg.channels.notify ? `<#${cfg.channels.notify}>` : "the announcements channel (set it with `/setup channels`)";
+          await i.reply({
+            content: on
+              ? `📣 Announcements are **on**: new movies, shows and albums are posted in ${where}, and members can pick Movies / TV / Music pings in \`/pings\`. Requests are still DMed to whoever asked.`
+              : "🔕 Announcements are **off**: nothing new is posted publicly, and `/pings` only offers Server status. Whoever requests something gets a live tracker by DM and a message when it's ready.",
+            flags: MessageFlags.Ephemeral,
+          });
+        },
       },
     ],
     components: { optin: toggle },

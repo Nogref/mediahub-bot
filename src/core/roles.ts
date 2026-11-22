@@ -16,6 +16,11 @@ export const OPT_CATEGORIES: Array<{ key: OptCategory; name: string; emoji: stri
   { key: "status", name: "Server status", emoji: "📡", blurb: "Ping me when a service goes down or comes back" },
 ];
 
+/** Movie/TV/music pings only mean something while "new on Plex" announcements are on. */
+export function visibleCategories(announcements: boolean) {
+  return announcements ? OPT_CATEGORIES : OPT_CATEGORIES.filter((c) => c.key === "status");
+}
+
 const ROLE_NAMES: Record<OptCategory, string> = { movies: "Movies", tv: "TV", music: "Music", status: "Server status" };
 const KV_KEY = "optin.roles";
 

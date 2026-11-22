@@ -175,11 +175,3 @@ export function renderAlerts(alerts: AlertEvent[]): EmbedBuilder {
     .setDescription(truncate(lines.join("\n"), 4000))
     .setTimestamp(new Date());
 }
-
-/** Plain-text @-mention lines; embeds don't ping, message content does. */
-export function readyLines(items: RenderItem[]): string {
-  const lines = items
-    .filter((it) => it.requesters.length)
-    .map((it) => `🎉 ${mentionList(it.requesters)} — **${itemLabel(it.event)}** is ready${isMusic(it.event) ? " to stream" : " on Plex"}!`);
-  return truncate(lines.join("\n"), 1900);
-}
