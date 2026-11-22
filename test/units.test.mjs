@@ -161,26 +161,6 @@ test("notifier: nothing public while announcements are off; when on, batches and
   store.close();
 });
 
-test("music queue: next, cap, radio cleanup, shuffle", async () => {
-  const { TrackQueue, MAX_QUEUE, fmtDuration } = await import("../dist/music/queue.js");
-  const t = (id, radio = false) => ({ song: { id, title: id, duration: 60 }, requestedBy: "x", radio });
-  const q = new TrackQueue();
-  q.add([t("a"), t("b")]);
-  q.add([t("n")], true);
-  assert.deepEqual(q.list().map((x) => x.song.id), ["n", "a", "b"]);
-  q.add([t("r1", true), t("r2", true)]);
-  q.clearRadio();
-  assert.equal(q.length, 3);
-  assert.equal(q.duration(), 180);
-  const big = Array.from({ length: MAX_QUEUE + 10 }, (_, i) => t(`x${i}`));
-  assert.equal(q.add(big), MAX_QUEUE - 3);
-  let k = 0;
-  q.shuffle(() => (k++ % 7) / 7);
-  assert.equal(q.length, MAX_QUEUE);
-  assert.equal(fmtDuration(387), "6:27");
-  assert.equal(fmtDuration(3725), "1:02:05");
-});
-
 test("Seerr issue webhooks: created → admin alert, resolved → issue event", () => {
   const [created] = parseSeerr({ notification_type: "ISSUE_CREATED", subject: "Heat (1995)", message: "No sound", issue: { issue_id: "4", issue_type: "AUDIO", reportedBy_username: "sam" } });
   assert.equal(created.type, "alert");
@@ -201,5 +181,5 @@ test("setup: GUILD_ID resolution and registration hints", async () => {
   assert.equal(resolveGuild("999", [home, { id: "222", name: "Other" }]).kind, "ambiguous");
   assert.match(registrationHint(50001, "42"), /applications\.commands.*client_id=42/);
   assert.match(registrationHint(10004, "42"), /Copy Server ID/);
-  assert.match(inviteUrl("42"), /scope=bot%20applications\.commands&permissions=271707136$/);
+  assert.match(inviteUrl("42"), /scope=bot%20applications\.commands&permissions=268561408$/);
 });

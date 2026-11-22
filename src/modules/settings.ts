@@ -33,7 +33,6 @@ const LIVE_KEYS = [
   { key: "welcome", label: "Welcome post" },
   { key: "plezy", label: "Plezy guide" },
   { key: "stats", label: "Stats board" },
-  { key: "nowplaying", label: "Now playing board" },
   { key: "pings-panel", label: "Ping panel" },
   { key: "help", label: "Commands guide" },
 ];
@@ -107,7 +106,7 @@ export const settings: ModuleFactory = ({ cfg, store, client, roles, bus }) => {
         { name: "Announcements", value: announcementsOn(store) ? "📣 On: new movies, shows and albums are posted publicly" : "🔕 Off: requests are DMed only (`/setup announcements`)" },
         { name: "Commands-only channels", value: Object.keys(commandsOnlyChannels(store)).map((id) => `<#${id}>`).join(", ") || "*none* (`/setup commands-only`)" },
       )
-      .setFooter({ text: "Change with /setup channels, /setup links, /setup welcome, /setup plezy, /setup stats, /setup nowplaying, /setup help, /setup commands-only, /setup announcements" });
+      .setFooter({ text: "Change with /setup channels, /setup links, /setup welcome, /setup plezy, /setup stats, /setup help, /setup commands-only, /setup announcements" });
     await i.reply({ embeds: [e], flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
   }
 

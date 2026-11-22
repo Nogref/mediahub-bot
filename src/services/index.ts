@@ -5,7 +5,6 @@ import { LidarrClient } from "./lidarr.js";
 import { PlexClient } from "./plex.js";
 import { SeerrClient } from "./seerr.js";
 import { ArrClient, NavidromeClient, TautulliClient, type HealthCheckable } from "./simple.js";
-import { SubsonicClient } from "./subsonic.js";
 import { WizarrClient } from "./wizarr.js";
 
 export interface Services {
@@ -18,7 +17,6 @@ export interface Services {
   wizarr?: WizarrClient;
   radarr?: ArrClient;
   sonarr?: ArrClient;
-  subsonic?: SubsonicClient;
 }
 
 export function buildServices(cfg: Config): Services {
@@ -32,12 +30,11 @@ export function buildServices(cfg: Config): Services {
     wizarr: cfg.wizarr && new WizarrClient(cfg.wizarr),
     radarr: cfg.radarr && new ArrClient("Radarr", cfg.radarr),
     sonarr: cfg.sonarr && new ArrClient("Sonarr", cfg.sonarr),
-    subsonic: cfg.subsonic && new SubsonicClient(cfg.subsonic),
   };
 }
 
 /** Status-board order. Only configured services appear. */
-const ORDER: Array<keyof Services> = ["plex", "seerr", "tautulli", "lidarr", "aurral", "subsonic", "navidrome", "wizarr", "radarr", "sonarr"];
+const ORDER: Array<keyof Services> = ["plex", "seerr", "tautulli", "lidarr", "aurral", "navidrome", "wizarr", "radarr", "sonarr"];
 
 export function healthTargets(services: Services): Array<{ key: string; client: HealthCheckable }> {
   return ORDER.flatMap((key) => {

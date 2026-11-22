@@ -43,8 +43,6 @@ export interface Config {
   wizarr?: KeyedServiceConfig & { publicUrl?: string; serverIds: number[] };
   radarr?: ServiceConfig & { apiKey?: string };
   sonarr?: ServiceConfig & { apiKey?: string };
-  /** Any Subsonic server (Aurral's /rest, Navidrome) used to stream into voice channels. */
-  subsonic?: ServiceConfig & { user: string; password: string; bitrate: number; idleMinutes: number };
 
   music: { primary: "lidarr" | "aurral" };
   notify: {
@@ -196,13 +194,6 @@ export function loadConfig(): Config {
     log.warn(`config: MUSIC_REQUEST_TARGET="${primaryRaw}" is not lidarr|aurral; using lidarr.`);
   }
 
-  const subsonicUrl = url("SUBSONIC_URL") ?? url("AURRAL_URL");
-  const subsonicUser = env("SUBSONIC_USER");
-  const subsonicPassword = env("SUBSONIC_PASSWORD");
-  if ((subsonicUser || subsonicPassword) && !(subsonicUrl && subsonicUser && subsonicPassword)) {
-    log.warn("config: music streaming needs SUBSONIC_USER, SUBSONIC_PASSWORD and SUBSONIC_URL (or AURRAL_URL); /music disabled.");
-  }
-
   const expiryRaw = num("INVITER_EXPIRY_DAYS", 7, 1);
   const inviterExpiry: 1 | 7 | 30 = expiryRaw === 1 || expiryRaw === 30 ? expiryRaw : 7;
   if (![1, 7, 30].includes(expiryRaw)) log.warn(`config: INVITER_EXPIRY_DAYS must be 1, 7 or 30 (Wizarr's options); using 7.`);
@@ -269,16 +260,6 @@ export function loadConfig(): Config {
     },
     radarr: radarrUrl ? { url: radarrUrl, apiKey: env("RADARR_API_KEY") } : undefined,
     sonarr: sonarrUrl ? { url: sonarrUrl, apiKey: env("SONARR_API_KEY") } : undefined,
-    subsonic:
-      subsonicUrl && subsonicUser && subsonicPassword
-        ? {
-            url: subsonicUrl,
-            user: subsonicUser,
-            password: subsonicPassword,
-            bitrate: num("MUSIC_BITRATE", 128, 32),
-            idleMinutes: num("MUSIC_IDLE_MINUTES", 5, 1),
-          }
-        : undefined,
     music: { primary },
     notify: {
       batchSeconds: num("NOTIFY_BATCH_SECONDS", 60, 1),

@@ -70,7 +70,7 @@ function click(registry, customId, extra = {}) {
 }
 
 test("command set: everything registers, gates set, admin-only commands hidden from members", () => {
-  const { registry } = setup({ subsonic: { url: `${mock.base}/aurral`, user: "bot", password: "pw", bitrate: 128, idleMinutes: 5 } });
+  const { registry } = setup();
   const usages = registry.help.map((h) => h.usage).sort();
   assert.deepEqual(usages, [
     "/admin aurral link", "/admin plex linked", "/admin plex unlink",
@@ -78,10 +78,9 @@ test("command set: everything registers, gates set, admin-only commands hidden f
     "/admin redownloads pause", "/admin redownloads plexcheck", "/admin redownloads resume", "/admin redownloads unban",
     "/admin suggestions review", "/admin suggestions top",
     "/aurral", "/help", "/invite aurral", "/invite create", "/invite list", "/invite revoke",
-    "/music play", "/music queue", "/music radio", "/music shuffle", "/music skip", "/music stop",
     "/pings", "/plex", "/plezy", "/random movie", "/redownload start", "/redownload status", "/report",
     "/request album", "/request movie", "/request series", "/requests",
-    "/setup announcements", "/setup channels", "/setup commands-only", "/setup edit", "/setup help", "/setup links", "/setup nowplaying", "/setup pings", "/setup plezy", "/setup reset", "/setup show",
+    "/setup announcements", "/setup channels", "/setup commands-only", "/setup edit", "/setup help", "/setup links", "/setup pings", "/setup plezy", "/setup reset", "/setup show",
     "/setup stats", "/setup statusboard", "/setup welcome",
     "/stats", "/status", "/suggest",
   ].sort());
@@ -112,7 +111,7 @@ test("missing services drop their commands", () => {
 });
 
 test("/help: short, grouped, plain-language; admin and inviter sections only for them", async () => {
-  const { registry } = setup({ subsonic: { url: `${mock.base}/aurral`, user: "bot", password: "pw", bitrate: 128, idleMinutes: 5 } });
+  const { registry } = setup();
   const help = async (extra = {}) => {
     const i = await slash(registry, "help", undefined, {}, extra);
     return json(i.last().embeds[0]);
@@ -669,29 +668,7 @@ test("live messages: deleted messages are re-posted on the next update", async (
   store.close();
 });
 
-test("Subsonic client: token auth, falls back to password auth on error 41, rejects bad credentials", async () => {
-  const { SubsonicClient } = await import("../dist/services/subsonic.js");
-  const base = { url: `${mock.base}/aurral`, password: "pw", bitrate: 96, idleMinutes: 5 };
-  const ok = new SubsonicClient({ ...base, user: "bot" });
-  const r = await ok.search("radiohead");
-  assert.equal(r.songs[0].title, "Paranoid Android");
-  const call = mock.calls.filter((x) => x.path === "/aurral/rest/search3").at(-1);
-  assert.equal(call.query.u, "bot");
-  assert.ok(call.query.t && call.query.s && !call.query.p, "token auth by default");
-  const stream = new URL(ok.streamUrl("s1"));
-  assert.equal(stream.searchParams.get("format"), "opus");
-  assert.equal(stream.searchParams.get("maxBitRate"), "96");
-
-  const tokenless = new SubsonicClient({ ...base, user: "tokenless" });
-  await tokenless.health();
-  const retry = mock.calls.filter((x) => x.path === "/aurral/rest/ping").at(-1);
-  assert.equal(retry.query.p, `enc:${Buffer.from("pw").toString("hex")}`);
-
-  const bad = new SubsonicClient({ ...base, user: "bad" });
-  await assert.rejects(bad.health(), /wrong Subsonic username or password/);
-});
-
-test("logs never show Subsonic credentials", async () => {
+test("logs never show credentials in URLs", async () => {
   const { redact } = await import("../dist/core/logger.js");
   assert.equal(redact("http://a/rest/stream?u=bot&t=abc&s=def&p=enc:00&id=1"), "http://a/rest/stream?u=bot&t=***&s=***&p=***&id=1");
 });

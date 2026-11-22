@@ -7,7 +7,6 @@ import type { ModuleFactory } from "../core/module.js";
 import { aurralAccounts } from "./aurralAccounts.js";
 import { invites } from "./invites.js";
 import { mediaRequests } from "./mediaRequests.js";
-import { music } from "./music.js";
 import { musicRequests } from "./musicRequests.js";
 import { myRequests } from "./myRequests.js";
 import { pings } from "./pings.js";
@@ -28,7 +27,6 @@ import { webhooks } from "./webhooks.js";
 export const moduleFactories: ModuleFactory[] = [
   mediaRequests, // /request movie|series        → Seerr
   musicRequests, // /request album               → Lidarr / Aurral
-  music, //         /music … + /setup nowplaying → Subsonic into a voice channel
   myRequests, //    /requests                    → your requests + live progress
   report, //        /report                      → Seerr issues, DM when fixed
   suggestions, //   /suggest + /admin suggestions … → ideas posted for 👍 votes, family-friendly

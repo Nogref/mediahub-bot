@@ -73,12 +73,6 @@ export function helpModule(getLines: () => HelpLine[]): ModuleFactory {
       {
         title: "🎵 Music",
         entries: [
-          {
-            cmds: ["/music play"],
-            text: "Play songs in a voice channel",
-            covers: ["/music "],
-            display: "`/music play` (also `radio` · `queue` · `skip` · `shuffle` · `stop`)",
-          },
           { cmds: ["/aurral"], text: "Your own music account, to listen on your phone or computer" },
         ],
       },

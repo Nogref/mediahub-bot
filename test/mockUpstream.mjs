@@ -126,27 +126,6 @@ export async function startMock() {
       return send(201, u);
     }
 
-    // ---------------- Subsonic (served by "Aurral")
-    if (p.startsWith("/aurral/rest/")) {
-      const method = p.slice("/aurral/rest/".length);
-      const q = url.searchParams;
-      const ok = (body) => send(200, { "subsonic-response": { status: "ok", version: "1.16.1", ...body } });
-      const fail = (code, message) => send(200, { "subsonic-response": { status: "failed", error: { code, message } } });
-      if (q.get("u") === "tokenless" && q.get("t")) return fail(41, "Token authentication failed");
-      if (q.get("u") === "bad") return fail(40, "Wrong username or password");
-      if (method === "ping") return ok({});
-      if (method === "search3") {
-        return ok({ searchResult3: {
-          song: [{ id: "s1", title: "Paranoid Android", artist: "Radiohead", album: "OK Computer", duration: 387, coverArt: "al-1" }],
-          album: [{ id: "al-1", name: "OK Computer", artist: "Radiohead" }],
-          artist: [{ id: "ar-1", name: "Radiohead" }],
-        } });
-      }
-      if (method === "getAlbum") return ok({ album: { id: "al-1", name: "OK Computer", artist: "Radiohead", song: [{ id: "s1", title: "Airbag" }, { id: "s2", title: "Paranoid Android" }] } });
-      if (method === "getPlaylists") return ok({ playlists: { playlist: [{ id: "pl-1", name: "Road trip", songCount: 2 }] } });
-      return fail(70, "not found");
-    }
-
     // ---------------- Wizarr
     if (p === "/wizarr/api/status") return send(200, { users: 3 });
     if (p === "/wizarr/api/servers") return send(200, { servers: [{ id: 1, name: "Plex", server_type: "plex", verified: true }, { id: 2, name: "JF", server_type: "jellyfin", verified: true }] });

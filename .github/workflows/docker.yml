@@ -71,7 +71,7 @@ jobs:
       - name: Smoke test the image
         run: |
           # Native modules load, privilege drop works, and the bot refuses to start without config.
-          docker run --rm --entrypoint node mediahub-bot:ci -e "require('better-sqlite3'); import('@discordjs/voice').then(v => { const r = v.generateDependencyReport(); console.log(r); if (!/davey: \d/.test(r)) process.exit(1); })"
+          docker run --rm --entrypoint node mediahub-bot:ci -e "require('better-sqlite3'); console.log('better-sqlite3 ok')"
           docker run --rm mediahub-bot:ci sh -c 'id -u; id -g' | tee ids.txt
           grep -qx 99 ids.txt
           out=$(docker run --rm mediahub-bot:ci 2>&1 || true)

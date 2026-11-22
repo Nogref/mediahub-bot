@@ -52,7 +52,7 @@ export const DEFAULT_POSTS: Record<PostName, PostContent> = {
         "`/request album`: the same for music.\n" +
         "I'll DM you a live tracker that shows how it's going, and message you when it's ready. `/requests` shows them all.",
       "**🎵 Music**\n" +
-        "`/music play` plays our library in whatever voice channel you're in, and `/music radio` plays random songs.\n" +
+        "Our music bot plays the library in voice channels: join one and type `/play` (its `/help` shows the rest).\n" +
         "`/aurral` gets you your own Aurral account to stream on your phone or computer: {aurral}\n\n" +
         "**📺 Watching**\n" +
         "We recommend the **Plezy** app, including Watch Together for movie nights. Tap the button below or type `/plezy`.",

@@ -20,7 +20,7 @@ const raw = `https://raw.githubusercontent.com/${OWNER}/${REPO}/main`;
 const REQUIRED = new Set(["DISCORD_TOKEN", "GUILD_ID"]);
 const SKIP = new Set(["DATA_DIR"]); // fixed to the /data path mapping below
 // Shown by default; everything else sits behind Unraid's "Show more settings".
-const ALWAYS = /^(DISCORD_TOKEN|GUILD_ID|ADMIN_ROLE_ID|INVITER_ROLE_ID|[A-Z_]+_CHANNEL_ID|WEBHOOK_SECRET|[A-Z]+_URL|[A-Z]+_API_KEY|PLEX_TOKEN|SUBSONIC_USER|SUBSONIC_PASSWORD)$/;
+const ALWAYS = /^(DISCORD_TOKEN|GUILD_ID|ADMIN_ROLE_ID|INVITER_ROLE_ID|[A-Z_]+_CHANNEL_ID|WEBHOOK_SECRET|[A-Z]+_URL|[A-Z]+_API_KEY|PLEX_TOKEN)$/;
 const MASK = /(TOKEN|KEY|SECRET|PASSWORD)$/;
 
 const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -63,7 +63,7 @@ const xml = `<?xml version="1.0"?>
   <Privileged>false</Privileged>
   <Support>https://github.com/${OWNER}/${REPO}/issues</Support>
   <Project>https://github.com/${OWNER}/${REPO}</Project>
-  <Overview>Discord bot for a Plex + Seerr + Radarr/Sonarr + Tautulli + Lidarr/Aurral + Wizarr stack: requests, new-content announcements with @-pings, a live status board, Wizarr invites and music streaming into voice channels. To reach other containers by name (http://lidarr:8686), set Network Type to the same custom network they use; on plain bridge, use http://YOUR-UNRAID-IP:PORT addresses instead.</Overview>
+  <Overview>Discord bot for a Plex + Seerr + Radarr/Sonarr + Tautulli + Lidarr/Aurral + Wizarr stack: requests with live DM trackers, redownloads and missing episodes, a live status board, Wizarr invites and optional new-content announcements. To reach other containers by name (http://lidarr:8686), set Network Type to the same custom network they use; on plain bridge, use http://YOUR-UNRAID-IP:PORT addresses instead.</Overview>
   <Category>MediaServer:Other Tools:</Category>
   <WebUI/>
   <TemplateURL>${raw}/unraid/my-mediahub-bot.xml</TemplateURL>
