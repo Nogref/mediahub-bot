@@ -183,3 +183,22 @@ test("setup: GUILD_ID resolution and registration hints", async () => {
   assert.match(registrationHint(10004, "42"), /Copy Server ID/);
   assert.match(inviteUrl("42"), /scope=bot%20applications\.commands&permissions=268561408$/);
 });
+
+test("welcome post: links fill in (with buttons), and lines for links that aren't set are left out", async () => {
+  const { DEFAULT_POSTS, renderPost } = await import("../dist/modules/posts.js");
+  const withLinks = renderPost("welcome", DEFAULT_POSTS.welcome, { server: "Nogref", requests: "https://nogref.com", aurral: "https://music.nogref.com" });
+  const text = withLinks.embeds.map((e) => e.toJSON().description).join("\n");
+  assert.match(text, /🎬 \*\*Request on the web:\*\* https:\/\/nogref\.com/);
+  assert.match(text, /🎵 \*\*Music:\*\* https:\/\/music\.nogref\.com/);
+  assert.match(text, /Requesting on https:\/\/nogref\.com works too/);
+  assert.match(text, /`\/redownload start`.*\n`\/missing`.*\n`\/report`/);
+  const buttons = withLinks.components[0].toJSON().components;
+  assert.deepEqual(buttons.map((b) => b.url ?? b.custom_id), ["https://nogref.com", "https://music.nogref.com", "optin:open", "posts:plezy"]);
+
+  const bare = renderPost("welcome", DEFAULT_POSTS.welcome, { server: "Nogref" });
+  const plain = bare.embeds.map((e) => e.toJSON().description).join("\n");
+  assert.doesNotMatch(plain, /\{requests\}|\{music\}|Request on the web|\*\*Music:\*\*|Requesting on/);
+  assert.match(plain, /`\/aurral` gets you your own login/);
+  assert.deepEqual(bare.components[0].toJSON().components.map((b) => b.custom_id), ["optin:open", "posts:plezy"]);
+});
+

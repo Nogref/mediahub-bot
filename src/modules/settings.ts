@@ -25,7 +25,8 @@ const CHANNELS: Array<{ key: ChannelKey; option: string; label: string; help: st
 ];
 
 const LINKS: Array<{ key: LinkKey; option: string; label: string; help: string }> = [
-  { key: "aurral", option: "aurral", label: "Aurral (public address)", help: "Where members open Aurral, e.g. https://music.example.com" },
+  { key: "requests", option: "requests", label: "Requests website (Seerr)", help: "Where members request on the web, e.g. https://requests.example.com" },
+  { key: "aurral", option: "aurral", label: "Music website (Aurral)", help: "Where members listen to music, e.g. https://music.example.com" },
   { key: "plezyRelay", option: "plezy_relay", label: "Plezy Watch Together relay", help: "Your relay, e.g. https://relay.example.com" },
 ];
 
@@ -132,7 +133,7 @@ export const settings: ModuleFactory = ({ cfg, store, client, roles, bus }) => {
     {
       ...SETUP,
       name: "links",
-      description: "Public addresses shown to members (Aurral, Plezy relay). Type 'none' to clear",
+      description: "Public addresses shown to members (requests site, music site, Plezy relay). Type 'none' to clear",
       build: (b) => {
         for (const l of LINKS) b.addStringOption((o) => o.setName(l.option).setDescription(l.help).setMaxLength(200));
         return b;

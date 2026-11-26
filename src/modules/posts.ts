@@ -7,7 +7,9 @@
  *  - /plezy                      anyone: posts the Plezy guide publicly in the current channel
  *
  * Text is plain Discord markdown, split into a title and up to four sections.
- * Tokens: {server} (server name), {aurral} (Aurral link), {relay} (Plezy relay).
+ * Tokens: {server} (server name), {requests} (requests website), {music} or {aurral}
+ * (music website), {relay} (Plezy relay). A line with {requests} or {music} is left
+ * out while that link isn't set (/setup links).
  */
 import {
   ActionRowBuilder,
@@ -45,23 +47,30 @@ export const DEFAULT_POSTS: Record<PostName, PostContent> = {
   welcome: {
     title: "👋 Welcome to {server}",
     sections: [
-      "This is our private media server: movies, TV and music for a small group of friends. It all runs on our own hardware, and this Discord is how you use it.\n\n" +
-        "**New here?** Ask an admin (or anyone with the Inviter role) for a Plex invite. The bot will DM you a link that walks you through joining.",
+      "This is our private media server: movies, TV and music for a small group of friends, running on our own hardware. This Discord is how you use it.\n\n" +
+        "**New here?** Ask an admin (or anyone with the Inviter role) for a Plex invite. The bot DMs you a link that walks you through joining.\n\n" +
+        "🎬 **Request on the web:** {requests} (sign in with your Plex account)\n" +
+        "🎵 **Music:** {music}",
       "**🎬 Getting something added**\n" +
         "`/request movie` or `/request series`: search, tap a result, done. There's no approval queue, it just downloads.\n" +
         "`/request album`: the same for music.\n" +
-        "I'll DM you a live tracker that shows how it's going, and message you when it's ready. `/requests` shows them all.",
+        "I DM you a live tracker that shows how it's going, and message you when it's ready. `/requests` shows them all.\n" +
+        "Requesting on {requests} works too: add your Discord user ID there (Profile → Settings → Notifications) to get the same tracker.",
       "**🎵 Music**\n" +
-        "Our music bot plays the library in voice channels: join one and type `/play` (its `/help` shows the rest).\n" +
-        "`/aurral` gets you your own Aurral account to stream on your phone or computer: {aurral}\n\n" +
+        "Listen in your browser or on your phone at {music}\n" +
+        "`/aurral` gets you your own login for it.\n" +
+        "Our music bot plays the library in voice channels: join one and type `/play` (its `/help` shows the rest).\n\n" +
         "**📺 Watching**\n" +
-        "We recommend the **Plezy** app, including Watch Together for movie nights. Tap the button below or type `/plezy`.",
-      "**🛠️ Problems & ideas**\n" +
-        "File glitchy or the audio's off? `/redownload start` swaps in a fresh copy and keeps you posted in your DMs. Episode missing from a season? `/missing` finds and downloads it. For anything else (missing subtitles, wrong info…), `/report` it and you'll get a DM when it's fixed. `/status` shows whether everything's up.\n" +
-        "Got an idea for the server? `/suggest` it, and 👍 the ideas you like.\n\n" +
-        "**🔔 Pings**\n" +
-        "Use the button below (or `/pings`) to choose what pings you.\n\n" +
-        "Lost? Type `/help` for everything I can do.",
+        "We recommend the **Plezy** app, including Watch Together for movie nights. Tap **About Plezy** below or type `/plezy`.",
+      "**🛠️ Something wrong?**\n" +
+        "`/redownload start`: glitchy file or bad audio? It swaps in a fresh copy and keeps you posted by DM.\n" +
+        "`/missing`: an episode missing from a season, or a movie that never showed up? It finds it and downloads it.\n" +
+        "`/report`: anything else (subtitles, wrong info…). You get a DM when it's fixed.\n" +
+        "`/status`: is everything up?\n\n" +
+        "**💡 Ideas**\n" +
+        "`/suggest` an idea for the server, and 👍 the ones you like.\n\n" +
+        "**🔔 Pings:** the button below (or `/pings`) picks what pings you.\n" +
+        "Lost? `/help` shows everything I can do.",
     ],
   },
   plezy: {
@@ -86,10 +95,23 @@ export const DEFAULT_POSTS: Record<PostName, PostContent> = {
 
 const LABELS: Record<PostName, string> = { welcome: "welcome post", plezy: "Plezy guide" };
 
-/** Fills in {server}, {aurral} and {relay}. */
-export function renderTokens(text: string, vars: { server: string; aurral?: string; relay?: string }): string {
+export interface PostVars {
+  server: string;
+  requests?: string;
+  aurral?: string;
+  relay?: string;
+}
+
+/** Fills in {server}, {requests}, {music}/{aurral} and {relay}; drops lines whose link isn't set. */
+export function renderTokens(text: string, vars: PostVars): string {
   return text
+    .split("\n")
+    .filter((line) => !(line.includes("{requests}") && !vars.requests) && !(line.includes("{music}") && !vars.aurral))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
     .replaceAll("{server}", vars.server)
+    .replaceAll("{requests}", vars.requests ?? "")
+    .replaceAll("{music}", vars.aurral ?? "")
     .replaceAll("{aurral}", vars.aurral ?? "ask an admin for the address")
     .replaceAll("{relay}", vars.relay ? `\`${vars.relay}\`` : "the default (leave it as it is)");
 }
@@ -99,7 +121,7 @@ export function embedChars(title: string, sections: string[]): number {
   return title.length + sections.reduce((a, s) => a + s.length, 0);
 }
 
-export function renderPost(name: PostName, content: PostContent, vars: { server: string; aurral?: string; relay?: string }): LivePayload {
+export function renderPost(name: PostName, content: PostContent, vars: PostVars): LivePayload {
   const color = name === "plezy" ? 0xe5a00d : Colors.info;
   const sections = content.sections.map((s) => renderTokens(s, vars)).filter((s) => s.trim());
   const embeds = (sections.length ? sections : [" "]).map((text, idx) => {
@@ -109,6 +131,8 @@ export function renderPost(name: PostName, content: PostContent, vars: { server:
   });
   const row = new ActionRowBuilder<ButtonBuilder>();
   if (name === "welcome") {
+    if (vars.requests) row.addComponents(new ButtonBuilder().setStyle(ButtonStyle.Link).setURL(vars.requests).setEmoji("🎬").setLabel("Request on the web"));
+    if (vars.aurral) row.addComponents(new ButtonBuilder().setStyle(ButtonStyle.Link).setURL(vars.aurral).setEmoji("🎵").setLabel("Music"));
     row.addComponents(
       new ButtonBuilder().setCustomId("optin:open").setEmoji("🔔").setLabel("Ping settings").setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId("posts:plezy").setEmoji("📱").setLabel("About Plezy").setStyle(ButtonStyle.Secondary),
@@ -131,8 +155,9 @@ export const posts: ModuleFactory = (ctx: AppContext) => {
   const lastPublic = new Map<string, number>();
 
   const content = (name: PostName): PostContent => store.kvGet<PostContent>(`post.${name}`) ?? DEFAULT_POSTS[name];
-  const vars = () => ({
+  const vars = (): PostVars => ({
     server: client.guilds?.cache.get(cfg.guildId)?.name ?? "our server",
+    requests: cfg.links.requests,
     aurral: cfg.links.aurral,
     relay: cfg.links.plezyRelay,
   });
@@ -252,6 +277,11 @@ export const posts: ModuleFactory = (ctx: AppContext) => {
 
   return {
     name: "posts",
+    // Redraw once at startup, so new built-in text and links show up after an update.
+    start: () => {
+      void refresh("welcome");
+      void refresh("plezy");
+    },
     commands: [{ name: "plezy", description: "Show everyone in this channel how to get Plezy and why it's better", execute: plezyPublic }],
     subcommands: [
       {

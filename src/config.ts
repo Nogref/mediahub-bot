@@ -23,7 +23,7 @@ export interface Config {
   /** Channels can also be set from Discord with /setup channels (stored in the DB, wins over env). */
   channels: { status?: string; notify?: string; admin?: string; music?: string; redownloadLog?: string; suggestions?: string };
   /** Public links shown to members; also settable with /setup links. */
-  links: { aurral?: string; plezyRelay?: string };
+  links: { requests?: string; aurral?: string; plezyRelay?: string };
   /** Ping roles. Unset ones are created by /setup and remembered in the DB. */
   roles: { movies?: string; tv?: string; music?: string; status?: string };
   invites: { inviterRoleId?: string; maxActive: number; expiryDays: 1 | 7 | 30 };
@@ -215,6 +215,7 @@ export function loadConfig(): Config {
       suggestions: env("SUGGESTIONS_CHANNEL_ID"),
     },
     links: {
+      requests: url("REQUESTS_PUBLIC_URL"),
       aurral: url("AURRAL_PUBLIC_URL"),
       plezyRelay: url("PLEZY_RELAY_URL"),
     },
